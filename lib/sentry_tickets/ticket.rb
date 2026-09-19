@@ -60,7 +60,7 @@ module SentryTickets
       lines << "- **Status:** #{val(@event.dig('contexts', 'http', 'status_code'))}" if @event.dig("contexts", "http")
       lines << "- **Body:** #{format_value(req['data'])}" if req["data"]
       lines << "- **Cookies:** #{format_value(req['cookies'])}" if req["cookies"]
-      lines << "- **User IP:** #{val(req['env', 'REMOTE_ADDR'])}" if req.dig("env", "REMOTE_ADDR")
+      lines << "- **User IP:** #{val(req.dig('env', 'REMOTE_ADDR'))}" if req.dig("env", "REMOTE_ADDR")
       lines.join("\n")
     end
 
@@ -71,10 +71,10 @@ module SentryTickets
       lines = ["## Exception", ""]
       # values is ordered root cause first; the raised exception is last, so
       # show the raised one first with its cause chain beneath it
-       values.reverse.each_with_index do |v, i|
-         prefix = i.zero? ? "" : "**Caused by:** "
-         # no code span: exception values contain literal backticks
-         line = "#{prefix}#{Store.exception_line(v)}"
+      values.reverse.each_with_index do |v, i|
+        prefix = i.zero? ? "" : "**Caused by:** "
+        # no code span: exception values contain literal backticks
+        line = "#{prefix}#{Store.exception_line(v)}"
         lines << line
         lines << "" if i < values.length - 1
       end
@@ -102,20 +102,27 @@ module SentryTickets
 
       out = ["## Stack trace", "```"]
       frames.each_with_index do |f, i|
-        loc = [f["filename"], f["lineno"]].compact.join(":")
+        loc = [f["filename"] || f["abs_path"], f["lineno"]].compact.join(":")
         func = f["function"] ? (f["module"] ? "#{f['module']}.#{f['function']}" : f["function"]) : nil
         out << "-- #{func || 'frame'} at #{loc}"
         pre = f["pre_context"] || []
         post = f["post_context"] || []
         if pre.any? || f["context_line"] || post.any?
-          pre.each { |ln| out << "    #{ln[1]}" }
-          out << ">   #{f['context_line']}" if f["context_line"]
-          post.each { |ln| out << "    #{ln[1]}" }
+          pre.each { |ln| out << "    #{context_text(ln)}" }
+          out << ">   #{f['context_line'].to_s.chomp}" if f["context_line"]
+          post.each { |ln| out << "    #{context_text(ln)}" }
         end
         out << "" if i < frames.length - 1
       end
       out << "```"
       out.join("\n")
+    end
+
+    # SDK payloads carry pre_context/post_context as raw source lines (plain
+    # strings, newline-terminated); hand-built events may use [lineno, text]
+    # pairs. Accept both and strip the trailing newline.
+    def context_text(ln)
+      (ln.is_a?(Array) ? ln[1] : ln).to_s.chomp
     end
 
     def user_section

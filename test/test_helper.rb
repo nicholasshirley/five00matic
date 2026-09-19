@@ -16,9 +16,10 @@ module Fixture
     f = { "lineno" => lineno, "function" => function, "module" => module_name,
           "filename" => filename, "in_app" => in_app }
     if context
-      f["pre_context"] = context
-      f["context_line"] = "<%= @customer.name %>"
-      f["post_context"] = context.map { |ln| [ln[0] + 1, "  end"] }
+      # Real SDK shape: raw source lines as strings, newline-terminated.
+      f["pre_context"] = context.map { |ln| "#{ln}\n" }
+      f["context_line"] = "    <%= @customer.name %>\n"
+      f["post_context"] = ["      end\n", "    end\n"]
     end
     f
   end
@@ -53,7 +54,7 @@ module Fixture
             "stacktrace" => { "frames" => [frame(5, function: "validate!")] } },
           { "type" => type, "value" => value,
             "stacktrace" => { "frames" => [frame(12, function: "index"),
-                                           frame(frame_lineno, context: [[25, "  def load"], [26, "    @customer"]])] } }
+                                           frame(frame_lineno, context: ["  def load", "    @customer"])] } }
         ]
       }
     }

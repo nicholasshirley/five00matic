@@ -50,8 +50,51 @@ class TicketTest < Minitest::Test
     assert crash, "main frame missing"
     assert older, "older frame missing"
     assert crash < older, "crash site must render before older frames"
-    assert_includes body, ">   <%= @customer.name %>"
+    assert_includes body, ">       <%= @customer.name %>"
     assert_includes body, "      def load"
+    assert_includes body, "          end"
+  end
+
+  def test_stacktrace_context_accepts_lineno_text_pairs
+    event = Fixture.event
+    frames = event.dig("exception", "values").last["stacktrace"]["frames"]
+    frames.last["pre_context"] = [[25, "  def load"]]
+    frames.last["context_line"] = "    boom"
+    frames.last["post_context"] = [[27, "  end"]]
+    body = SentryTickets::Ticket.new(event, @rec).body
+    assert_includes body, "      def load"
+    assert_includes body, ">       boom"
+    assert_includes body, "      end"
+  end
+
+  def test_stacktrace_falls_back_to_abs_path
+    event = Fixture.event
+    frames = event.dig("exception", "values").last["stacktrace"]["frames"]
+    frames.last.delete("filename")
+    frames.last["abs_path"] = "/app/lib/orders.rb"
+    body = SentryTickets::Ticket.new(event, @rec).body
+    assert_includes body, "-- Order.load at /app/lib/orders.rb:26"
+  end
+
+  def test_request_section_renders_without_crashing
+    event = Fixture.event.merge(
+      "request" => {
+        "method" => "POST",
+        "url" => "https://app.example.com/orders",
+        "query_string" => "page=2",
+        "data" => { "customer_id" => 42 },
+        "cookies" => "session=abc",
+        "env" => { "REMOTE_ADDR" => "203.0.113.7" }
+      }
+    )
+    store = Fixture.store
+    _, rec, = store.ingest(event, now: Time.utc(2026, 9, 19, 12))
+    body = SentryTickets::Ticket.new(event, rec).body
+    assert_includes body, "## Request"
+    assert_includes body, "**Method:** POST"
+    assert_includes body, "**URL:** https://app.example.com/orders (query: page=2)"
+    assert_includes body, "**User IP:** 203.0.113.7"
+    assert_includes body, "**Cookies:** session=abc"
   end
 
   def test_raw_payload_embedded
