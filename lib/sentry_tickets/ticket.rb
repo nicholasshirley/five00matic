@@ -3,7 +3,7 @@
 require "json"
 
 module SentryTickets
-  # Renders an Event into a GitHub issue body.
+  # Renders an event and its group into a GitHub issue body.
   class Ticket
     MAX_FRAMES = 20
     MAX_BREADCRUMBS = 10
@@ -11,9 +11,9 @@ module SentryTickets
     # single fat event cannot permanently fail delivery.
     MAX_BODY_CHARS = 60_000
 
-    def initialize(event, record)
+    def initialize(event, group)
       @event = event
-      @record = record
+      @group = group
     end
 
     def body
@@ -45,11 +45,11 @@ module SentryTickets
       lines << "- **Environment:** #{@event.environment}" if @event.environment
       lines << "- **Release:** #{@event.release}" if @event.release
       lines << "- **Server:** #{@event.server_name}" if @event.server_name
-      lines << "- **First seen:** #{@record['first_seen']}"
-      lines << "- **Last seen:** #{@record['last_seen']}"
-      lines << "- **Occurrences:** #{@record['count']}"
-      lines << "- **Fingerprint:** `#{@record['fingerprint'].to_s[0, 16]}`"
-      lines << "- **Latest event:** `#{@record['last_event_id']}`" if @record["last_event_id"]
+      lines << "- **First seen:** #{@group.first_seen}"
+      lines << "- **Last seen:** #{@group.last_seen}"
+      lines << "- **Occurrences:** #{@group.count}"
+      lines << "- **Fingerprint:** `#{@group.fingerprint[0, 16]}`"
+      lines << "- **Latest event:** `#{@group.last_event_id}`" if @group.last_event_id
       lines.join("\n")
     end
 

@@ -3,111 +3,46 @@
 require_relative "test_helper"
 
 class StoreTest < Minitest::Test
-  T0 = Time.utc(2026, 9, 19, 12, 0, 0)
+  T0 = Time.utc(2026, 9, 19, 12)
 
-  def test_first_event_opens_and_counts
+  def test_record_starts_a_group_then_counts_it
     store = Fixture.store
-    action, rec, = store.ingest(Fixture.event, now: T0)
-    assert_equal :opened, action
-    assert_equal 1, rec["count"]
-    assert_equal false, rec["issue_pending"]
-    assert_equal T0.iso8601, rec["first_seen"]
+    first = store.record(Fixture.event, at: T0)
+    assert_equal 1, first.count
+    assert_equal T0.iso8601, first.first_seen
+    assert_equal 2, store.record(Fixture.event, at: T0 + 60).count
+    assert_equal 1, store.size
   end
 
-  def test_recurrence_before_notice_interval_is_suppressed
+  def test_update_replaces_the_group
     store = Fixture.store
-    store.ingest(Fixture.event, now: T0)
-    store.record_delivered(Fixture.event.fingerprint, number: 7, url: "http://gh/7", at: T0)
-
-    action, rec, = store.ingest(Fixture.event, now: T0 + 3600)
-    assert_equal :suppressed, action
-    assert_equal 2, rec["count"]
-    assert_equal 7, rec["issue_number"]
+    fingerprint = store.record(Fixture.event, at: T0).fingerprint
+    assert_equal "boom", store.update(fingerprint) { |group| group.failed("boom") }.last_error
+    assert_equal "boom", store.groups.first.last_error
   end
 
-  def test_recurrence_after_notice_interval_comments
+  def test_groups_are_ordered_most_recently_seen_first
     store = Fixture.store
-    store.ingest(Fixture.event, now: T0)
-    store.record_delivered(Fixture.event.fingerprint, number: 7, at: T0)
-
-    action, rec, = store.ingest(Fixture.event, now: T0 + 21_601)
-    assert_equal :commented, action
-    assert_equal 2, rec["count"]
-  end
-
-  def test_local_time_is_stored_as_same_utc_instant
-    store = Fixture.store
-    local = Time.new(2026, 9, 19, 5, 0, 0, "-07:00")
-    _, rec, = store.ingest(Fixture.event, now: local)
-    assert_equal local.getutc.iso8601, rec["first_seen"],
-                 "wall-clock components must not be reinterpreted as UTC"
-  end
-
-  def test_local_delivery_time_anchors_notice_window_by_instant
-    store = Fixture.store(Fixture.store_dir, 3600)
-    fp = Fixture.event.fingerprint
-    store.ingest(Fixture.event, now: Time.utc(2026, 9, 19, 12))
-    store.record_delivered(fp, number: 7, at: Time.new(2026, 9, 19, 5, 0, 0, "-07:00"))
-
-    action, = store.ingest(Fixture.event, now: Time.utc(2026, 9, 19, 12, 0, 30))
-    assert_equal :suppressed, action
-    action, = store.ingest(Fixture.event, now: Time.utc(2026, 9, 19, 13, 0, 1))
-    assert_equal :commented, action
-  end
-
-  def test_delivery_success_anchors_notice_window
-    store = Fixture.store
-    fp = Fixture.event.fingerprint
-    store.ingest(Fixture.event, now: T0)
-    store.record_delivered(fp, number: 7, at: T0)
-
-    # count moves without advancing the anchor while suppressed
-    store.ingest(Fixture.event, now: T0 + 60)
-    # still due against the T0 anchor, even though only ~2h of *events* elapsed
-    # since the last suppressed count
-    action, rec, = store.ingest(Fixture.event, now: T0 + 21_720)
-    assert_equal :commented, action
-    assert_equal 3, rec["count"]
-  end
-
-  def test_failed_open_retries_next_occurrence
-    store = Fixture.store
-    fp = Fixture.event.fingerprint
-    store.ingest(Fixture.event, now: T0)
-    store.record_delivery_error(fp, "GitHub API 502: boom")
-
-    action, = store.ingest(Fixture.event, now: T0 + 60)
-    assert_equal :opened, action, "issue_pending stays false until delivery succeeds"
-    assert_equal "GitHub API 502: boom", store.all.first["last_error"]
-  end
-
-  def test_all_orders_by_seen_instant_across_precisions
-    dir = Fixture.store_dir
-    store = Fixture.store(dir)
-    base = Time.utc(2026, 9, 19, 12)
-    store.ingest(Fixture.event(id: "a"), now: base)
-    store.ingest(Fixture.event(id: "b", type: "RuntimeError", message: "boom b"), now: base + 0.5)
-    store.ingest(Fixture.event(id: "c", type: "ArgumentError", message: "boom c"), now: base + 1)
-
-    assert_equal %w[c b a], store.all.map { |r| r["last_event_id"] }
+    store.record(Fixture.event(id: "a"), at: T0)
+    store.record(Fixture.event(id: "b", type: "RuntimeError"), at: T0 + 1)
+    store.record(Fixture.event(id: "c", type: "ArgumentError"), at: T0 + 2)
+    assert_equal %w[c b a], store.groups.map(&:last_event_id)
   end
 
   def test_persists_across_instances
     dir = Fixture.store_dir
     store = Fixture.store(dir)
-    fp = Fixture.event.fingerprint
-    store.ingest(Fixture.event, now: T0)
-    store.record_delivered(fp, number: 9, url: "http://gh/9")
+    fingerprint = store.record(Fixture.event, at: T0).fingerprint
+    store.update(fingerprint) { |group| group.delivered({ "number" => 9, "url" => "http://gh/9" }, at: T0) }
 
     reloaded = Fixture.store(dir)
-    assert_equal 1, reloaded.tracked
-    assert_equal 9, reloaded.all.first["issue_number"]
+    assert_equal 1, reloaded.size
+    assert_equal store.groups.first, reloaded.groups.first
   end
 
-  def test_state_file_is_owner_readable_only
+  def test_file_is_owner_readable_only
     dir = Fixture.store_dir
-    store = Fixture.store(dir)
-    store.ingest(Fixture.event, now: T0)
-    assert_equal 0o600, File.stat(File.join(dir, "state.json")).mode & 0o777
+    Fixture.store(dir).record(Fixture.event, at: T0)
+    assert_equal 0o600, File.stat(File.join(dir, "groups.json")).mode & 0o777
   end
 end

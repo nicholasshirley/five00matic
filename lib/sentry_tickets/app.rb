@@ -10,9 +10,9 @@ module SentryTickets
     InvalidPayload = Class.new(StandardError)
 
     def initialize(config, store: nil, destination: nil)
-      @store = store || Store.new(data_dir: config.data_dir, notice_interval: config.notice_interval)
+      @store = store || Store.new(config.data_dir)
       @destination = destination || destination_for(config)
-      @tracker = Tracker.new(store: @store, destination: @destination)
+      @tracker = Tracker.new(store: @store, destination: @destination, notice_interval: config.notice_interval)
     end
 
     attr_reader :store, :destination
@@ -21,8 +21,8 @@ module SentryTickets
       case [env["REQUEST_METHOD"], env["PATH_INFO"]]
       when ["POST", "/events"] then receive(env["rack.input"]&.read.to_s)
       when ["GET", "/health"] then json({ status: "ok", version: VERSION, dry_run: @destination.dry_run?,
-                                          tracked: @store.tracked })
-      when ["GET", "/issues"] then json(@store.all)
+                                          tracked: @store.size })
+      when ["GET", "/issues"] then json(@store.groups.map(&:to_h))
       else json({ error: "not found" }, status: 404)
       end
     end
@@ -39,15 +39,15 @@ module SentryTickets
     # occurrence, so the answer is still 200: the event is durably counted,
     # and the sender (before_send returning nil) has handed off ownership.
     def receive(body)
-      action, rec = @tracker.track(parse(body))
+      action, group = @tracker.track(parse(body))
       json({
         action: action.to_s,
-        count: rec["count"],
-        fingerprint: rec["fingerprint"],
-        first_seen: rec["first_seen"],
-        last_seen: rec["last_seen"],
-        issue: rec["issue_url"] || rec["outbox"],
-        issue_error: rec["last_error"]
+        count: group.count,
+        fingerprint: group.fingerprint,
+        first_seen: group.first_seen,
+        last_seen: group.last_seen,
+        issue: group.issue_url,
+        issue_error: group.last_error
       })
     rescue InvalidPayload => e
       json({ error: e.message }, status: 400)

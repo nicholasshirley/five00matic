@@ -73,7 +73,7 @@ class AppTest < Minitest::Test
     resp = JSON.parse(body.join)
     assert_equal "opened", resp["action"]
     assert_equal 2, outbox_files.size
-    assert @app.store.tracked == 2
+    assert_equal 2, @app.store.size
   end
 
   def test_garbage_rejected

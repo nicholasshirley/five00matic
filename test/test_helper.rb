@@ -81,7 +81,7 @@ module Fixture
     Dir.mktmpdir("sentry-tickets-test")
   end
 
-  def self.store(dir = store_dir, interval = 21_600)
-    SentryTickets::Store.new(data_dir: dir, notice_interval: interval)
+  def self.store(dir = store_dir)
+    SentryTickets::Store.new(dir)
   end
 end

@@ -3,77 +3,79 @@
 module SentryTickets
   # Records each error occurrence and gives the destination whatever it is
   # now owed: the issue on a fingerprint's first sighting, a throttled
-  # recurrence notice after that. A failed delivery is kept on the record and
+  # recurrence notice after that. A failed delivery is kept on the group and
   # retried on the fingerprint's next occurrence.
   class Tracker
-    def initialize(store:, destination:)
+    def initialize(store:, destination:, notice_interval:)
       @store = store
       @destination = destination
+      @notice_interval = notice_interval
       # Serializes record -> deliver per fingerprint: without it, two
       # concurrent first occurrences of one error would both open an issue.
       @locks = {}
       @locks_mutex = Mutex.new
     end
 
-    # Returns [action, record], the action being the delivery attempted:
-    # :opened, :commented or :suppressed.
-    def track(event)
+    # Returns [action, group]: the delivery attempted (:opened, :commented or
+    # :suppressed) and the group as it is afterwards.
+    def track(event, now: Time.now)
       lock_for(event.fingerprint).synchronize do
-        action, rec, = @store.ingest(event)
-        [deliver(action, rec, event), rec]
+        group = @store.record(event, at: now)
+        deliver(action_for(group, now), group, event, now)
       end
     end
 
     private
 
-    def lock_for(fp)
-      @locks_mutex.synchronize { @locks[fp] ||= Mutex.new }
+    def lock_for(fingerprint)
+      @locks_mutex.synchronize { @locks[fingerprint] ||= Mutex.new }
     end
 
-    def deliver(action, rec, event)
-      fp = rec["fingerprint"]
+    def action_for(group, now)
+      return :opened unless group.issue
+
+      group.notice_due?(now, @notice_interval) ? :commented : :suppressed
+    end
+
+    def deliver(action, group, event, now)
       case action
       when :opened
-        open_issue(rec, event)
+        open_issue(group, event, now)
       when :commented
-        if rec["issue_number"].nil? && !@destination.dry_run?
+        if group.issue["number"].nil? && !@destination.dry_run?
           # The issue only ever existed in dry-run mode (state predates the
           # token); there is no GitHub issue to comment on, so open one.
-          open_issue(rec, event)
+          open_issue(group, event, now)
         else
           begin
-            @destination.comment(number: rec["issue_number"], body: notice_text(rec))
-            @store.record_delivered(fp)
-            :commented
+            @destination.comment(number: group.issue["number"], body: notice_text(group))
+            [:commented, @store.update(group.fingerprint) { |g| g.delivered(g.issue, at: now) }]
           rescue DeliveryError => e
             # The tracked issue number points at nothing on GitHub (the issue
             # was deleted, or the repo was re-created); open a fresh issue
             # instead of erroring on every recurrence forever.
             raise unless e.status == 404
-            open_issue(rec, event)
+            open_issue(group, event, now)
           end
         end
-      else # :suppressed
-        action
+      else
+        [:suppressed, group]
       end
     rescue DeliveryError => e
-      @store.record_delivery_error(fp, e.message)
-      action
+      [action, @store.update(group.fingerprint) { |g| g.failed(e.message) }]
     end
 
-    def open_issue(rec, event)
-      r = @destination.open_issue(title: event.title, body: Ticket.new(event, rec).body)
-      @store.record_delivered(rec["fingerprint"], number: r["number"], url: r["url"], outbox: r["outbox"])
-      :opened
+    def open_issue(group, event, now)
+      issue = @destination.open_issue(title: event.title, body: Ticket.new(event, group).body)
+      [:opened, @store.update(group.fingerprint) { |g| g.delivered(issue, at: now) }]
     end
 
-    def notice_text(rec)
-      since = rec["count"] - (rec["last_notice_count"] || 0)
+    def notice_text(group)
       "Recurrence notice.\n\n" \
-        "- New occurrences since last notice: #{since}\n" \
-        "- Total occurrences: #{rec['count']}\n" \
-        "- First seen: #{rec['first_seen']}\n" \
-        "- Latest seen: #{rec['last_seen']} (event `#{rec['last_event_id']}`)"
+        "- New occurrences since last notice: #{group.unnotified_count}\n" \
+        "- Total occurrences: #{group.count}\n" \
+        "- First seen: #{group.first_seen}\n" \
+        "- Latest seen: #{group.last_seen} (event `#{group.last_event_id}`)"
     end
   end
 end

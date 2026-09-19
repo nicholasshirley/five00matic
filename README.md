@@ -16,7 +16,8 @@ installed under RVM Ruby 3.2.0, but the code runs on plain modern Ruby
 lib/sentry_tickets.rb          entry point
 lib/sentry_tickets/config.rb   env-driven configuration
 lib/sentry_tickets/event.rb    the SDK payload: fingerprint, title, sections
-lib/sentry_tickets/store.rb    counts, throttle anchors (JSON file)
+lib/sentry_tickets/group.rb    one fingerprint: counts, its issue, notice anchors
+lib/sentry_tickets/store.rb    the groups, persisted (JSON file)
 lib/sentry_tickets/ticket.rb   GitHub-issue markdown rendering
 lib/sentry_tickets/github.rb   thin GitHub REST client
 lib/sentry_tickets/outbox.rb   dry-run stand-in: tickets as markdown files
@@ -27,7 +28,7 @@ config.ru                      RACK entry (puma/rackup) for a real deployment, m
 scripts/make_sample_event.rb   generates a real event using the installed SDK
 test/                          minitest suite
 sample/                        generated sample payloads (gitignored)
-data/                          state.json + outbox/ (gitignored)
+data/                          groups.json + outbox/ (gitignored)
 ```
 
 ## Running
@@ -126,8 +127,8 @@ Notes:
   rendered tickets are capped below that. The raw-payload section switches to
   compact JSON and is clipped first; only an event whose structured sections
   alone overflow gets those clipped too.
-- **State** is a single JSON file written atomically; restarts and
-  redeploys keep counts and throttle anchors. State and outbox files carry
+- **State** is a single JSON file (`data/groups.json`) written atomically;
+  restarts and redeploys keep counts and throttle anchors. State and outbox files carry
   event content (user ids, request bodies) and are written owner-only
   (0600). For a real deployment behind a load balancer, put state on shared
   storage or keep a single instance.

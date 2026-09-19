@@ -6,6 +6,7 @@ require "time"
 
 require_relative "sentry_tickets/config"
 require_relative "sentry_tickets/event"
+require_relative "sentry_tickets/group"
 require_relative "sentry_tickets/store"
 require_relative "sentry_tickets/ticket"
 require_relative "sentry_tickets/delivery_error"

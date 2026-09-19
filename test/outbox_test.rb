@@ -10,8 +10,8 @@ class OutboxTest < Minitest::Test
 
   def test_open_issue_writes_a_markdown_file
     r = @outbox.open_issue(title: "boom", body: "the body")
-    assert_match %r{\Aissue-boom\.[0-9a-f]{8}\.\d{8}-\d{6}\.md\z}, File.basename(r["outbox"])
-    assert_equal "# boom\n\nthe body\n", File.read(r["outbox"])
+    assert_match %r{\Aissue-boom\.[0-9a-f]{8}\.\d{8}-\d{6}\.md\z}, File.basename(r["url"])
+    assert_equal "# boom\n\nthe body\n", File.read(r["url"])
     assert_nil r["number"]
   end
 
@@ -37,7 +37,7 @@ class OutboxTest < Minitest::Test
 
   def test_files_are_owner_readable_only
     r = @outbox.open_issue(title: "boom", body: "the body")
-    assert_equal 0o600, File.stat(r["outbox"]).mode & 0o777
+    assert_equal 0o600, File.stat(r["url"]).mode & 0o777
   end
 
   def test_unwritable_directory_wraps_as_delivery_error

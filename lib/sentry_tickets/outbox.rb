@@ -14,9 +14,9 @@ module SentryTickets
 
     def dry_run? = true
 
-    # Returns { "outbox" => String }, the file's path.
+    # Returns { "url" => String }: the file's path stands in for the issue's URL.
     def open_issue(title:, body:)
-      { "outbox" => write("issue", title, body) }
+      { "url" => write("issue", title, body) }
     end
 
     def comment(number:, body:)

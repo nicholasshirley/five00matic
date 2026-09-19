@@ -3,13 +3,15 @@
 require_relative "test_helper"
 
 class TicketTest < Minitest::Test
+  T0 = Time.utc(2026, 9, 19, 12)
+
   def setup
-    store = Fixture.store
-    @_, @rec, @event = store.ingest(Fixture.event, now: Time.utc(2026, 9, 19, 12))
-    @ticket = SentryTickets::Ticket.new(@event, @rec)
+    @event = Fixture.event
+    @group = SentryTickets::Group.start(@event.fingerprint, at: T0).record(@event, at: T0)
+    @ticket = SentryTickets::Ticket.new(@event, @group)
   end
 
-  def ticket(payload, record = @rec) = SentryTickets::Ticket.new(SentryTickets::Event.new(payload), record)
+  def ticket(payload, group = @group) = SentryTickets::Ticket.new(SentryTickets::Event.new(payload), group)
 
   def test_body_has_core_sections
     body = @ticket.body
@@ -58,7 +60,7 @@ class TicketTest < Minitest::Test
     frame = event.dig("exception", "values").last["stacktrace"]["frames"].last
     frame["pre_context"] = "garbage"
     frame["post_context"] = "garbage"
-    body = ticket(event, @rec).body
+    body = ticket(event).body
     assert_includes body, "-- Order.load"
   end
 
@@ -67,14 +69,14 @@ class TicketTest < Minitest::Test
     event = Fixture.payload
     frame = event.dig("exception", "values").last["stacktrace"]["frames"].last
     frame["pre_context"] = [nil, nil, "class Order\n"]
-    body = ticket(event, @rec).body
+    body = ticket(event).body
     assert_includes body, "-- Order.load at /app/lib/orders.rb:26\n    class Order\n>   "
   end
 
   def test_breadcrumb_without_numeric_timestamp_renders_string_or_unknown
     crumbs = [Fixture.breadcrumb("http", "GET /x", timestamp: nil),
               Fixture.breadcrumb("redis", "get k", timestamp: "not-a-ts-but-a-string")]
-    body = ticket(Fixture.payload(breadcrumbs: crumbs), @rec).body
+    body = ticket(Fixture.payload(breadcrumbs: crumbs)).body
     assert_includes body, "[INFO] ? http"
     assert_includes body, "not-a-ts-but-a-string redis"
   end
@@ -84,7 +86,7 @@ class TicketTest < Minitest::Test
     frames = event.dig("exception", "values").last["stacktrace"]["frames"]
     frames.last.delete("filename")
     frames.last["abs_path"] = "/app/lib/orders.rb"
-    body = ticket(event, @rec).body
+    body = ticket(event).body
     assert_includes body, "-- Order.load at /app/lib/orders.rb:26"
   end
 
@@ -99,9 +101,7 @@ class TicketTest < Minitest::Test
         "env" => { "REMOTE_ADDR" => "203.0.113.7" }
       }
     )
-    store = Fixture.store
-    _, rec, = store.ingest(SentryTickets::Event.new(event), now: Time.utc(2026, 9, 19, 12))
-    body = ticket(event, rec).body
+    body = ticket(event).body
     assert_includes body, "## Request"
     assert_includes body, "**Method:** POST"
     assert_includes body, "**URL:** https://app.example.com/orders (query: page=2)"
@@ -112,7 +112,7 @@ class TicketTest < Minitest::Test
   def test_breadcrumbs_rendered_with_last_ten_cap
     crumbs = 15.times.map { |i| Fixture.breadcrumb("http", "GET /api/orders?page=#{i}", timestamp: 1_758_268_800 + i) }
     event = Fixture.payload(breadcrumbs: crumbs)
-    body = ticket(event, @rec).body
+    body = ticket(event).body
     assert_includes body, "## Breadcrumbs (last 10)"
     assert_includes body, "[INFO] 2025-09-19 08:00:14 http — GET /api/orders?page=14"
     refute_includes body, "page=4\n", "only the last 10 crumbs are shown"
@@ -123,7 +123,7 @@ class TicketTest < Minitest::Test
     crumbs = [Fixture.breadcrumb("redis", "hmset user:42", level: "warning",
                                  timestamp: "2026-09-19T12:00:00Z", data: { "key" => "user:42" })]
     event = Fixture.payload(breadcrumbs: crumbs)
-    body = ticket(event, @rec).body
+    body = ticket(event).body
     assert_includes body, "[WARNING] 2026-09-19T12:00:00Z redis — hmset user:42"
     assert_includes body, '`{"key":"user:42"}`'
   end
@@ -134,7 +134,7 @@ class TicketTest < Minitest::Test
       "contexts" => "garbage",
       "request" => { "url" => "https://x", "env" => "garbage" }
     )
-    body = ticket(garbage, @rec).body
+    body = ticket(garbage).body
     assert_includes body, "## Summary"
     assert_includes body, "## Request"
     assert_includes body, "**URL:** https://x"
@@ -142,7 +142,7 @@ class TicketTest < Minitest::Test
     refute_includes body, "## Contexts"
 
     crumbs_garbage = Fixture.payload(breadcrumbs: [7, "oops"])
-    body = ticket(crumbs_garbage, @rec).body
+    body = ticket(crumbs_garbage).body
     refute_includes body, "## Breadcrumbs", "non-hash crumbs are dropped, not rendered"
   end
 
@@ -158,7 +158,7 @@ class TicketTest < Minitest::Test
     # GitHub rejects issue bodies over 65,536 characters; one fat event must
     # not make the ticket permanently undeliverable.
     event = Fixture.payload.merge("extra" => { "blob" => "x" * 200_000 })
-    body = ticket(event, @rec).body
+    body = ticket(event).body
     assert_operator body.length, :<=, SentryTickets::Ticket::MAX_BODY_CHARS
     assert_includes body, "## Summary"
     assert_includes body, "*(payload truncated to fit GitHub issue size limits)*"
@@ -168,7 +168,7 @@ class TicketTest < Minitest::Test
   def test_body_clips_when_structured_sections_alone_overflow
     tags = 200.times.map { |i| ["tag_#{i}", "v" * 450] }.to_h
     event = Fixture.payload.merge("tags" => tags)
-    body = ticket(event, @rec).body
+    body = ticket(event).body
     assert_operator body.length, :<=, SentryTickets::Ticket::MAX_BODY_CHARS
     assert_includes body, "*(sections truncated to fit GitHub issue size limits)*"
   end
