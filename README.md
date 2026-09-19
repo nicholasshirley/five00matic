@@ -71,8 +71,12 @@ Sentry.init do |config|
 
   config.before_send = lambda do |event, _hint|
     uri = URI(TICKET_URL)
-    Net::HTTP.post(uri, event.to_json_compatible.to_json, "Content-Type" => "application/json")
-    nil # returning nil stops the event from going to Sentry at all
+    begin
+      Net::HTTP.post(uri, event.to_json_compatible.to_json, "Content-Type" => "application/json")
+      nil # returning nil stops the event from going to Sentry at all
+    rescue StandardError
+      event # receiver unreachable: fall back to Sentry rather than losing the event
+    end
   end
 end
 ```
@@ -80,6 +84,10 @@ end
 Notes:
 
 - Returning `event` instead of `nil` double-sends (Sentry + receiver).
+- If the POST raises (receiver down), the SDK's background worker logs the
+  error and drops the event - and returning `nil` means Sentry never saw it
+  either. The rescue above returns `event` so Sentry takes it as a fallback;
+  drop the rescue if you would rather lose the event than double-report.
 - The hook already runs on a background worker thread in the SDK; the POST is
   the only added latency. Keep it small, or queue it if your app also has a
   job system.
@@ -113,6 +121,9 @@ Notes:
 ## Known simplifications (prototype scope)
 
 - Inline delivery, no queue (fine at dormant-project scale).
+- Delivery is at-least-once: if GitHub times out after creating an issue but
+  before the response arrives, the retry opens a duplicate issue. Issue
+  creation has no idempotency key.
 - Single-node state file; not multi-process safe. Within one process the
   ingest-to-delivery path is serialized per fingerprint, so a single
   instance will not double-open an issue.
