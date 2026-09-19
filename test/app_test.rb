@@ -339,6 +339,20 @@ class AppTest < Minitest::Test
     assert_equal 2, resp["count"]
   end
 
+  def test_dry_run_outbox_failure_is_recorded_not_500
+    dir = Fixture.store_dir
+    File.write(File.join(dir, "outbox"), "x") # outbox path taken by a file
+    app = SentryTickets::App.new(
+      SentryTickets::Config.new(repo: nil, token: nil, data_dir: dir, notice_interval: 0)
+    )
+    status, _, body = post(Fixture.event.to_json, {}, app: app)
+    resp = JSON.parse(body.join)
+    assert_equal 200, status
+    assert_equal "opened", resp["action"]
+    assert_match(/EEXIST|not a directory/i, resp["issue_error"])
+    assert_equal 1, resp["count"], "the event is durably counted even when the outbox is not"
+  end
+
   def test_comment_on_deleted_issue_opens_a_replacement
     dir = Fixture.store_dir
     github = GoneCommentGitHub.new

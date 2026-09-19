@@ -121,6 +121,10 @@ module SentryTickets
       file = File.join(@outbox_dir, "#{kind}-#{self.class.slugify(title)}.#{digest}.#{stamp}.md")
       File.write(file, "# #{title}\n\n#{text}\n")
       file
+    rescue SystemCallError, IOError => e
+      # Match the network path: a failed delivery is recorded and retried on
+      # the next occurrence, it does not 500 the ingest.
+      raise DeliveryError, self.class.scrub("#{e.class}: #{e.message}")
     end
   end
 end

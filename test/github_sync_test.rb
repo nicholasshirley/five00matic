@@ -48,6 +48,16 @@ class GitHubSyncTest < Minitest::Test
     refute_equal files[0], files[1]
   end
 
+  def test_unwritable_outbox_wraps_as_delivery_error
+    file = File.join(Dir.mktmpdir, "a-file")
+    File.write(file, "x")
+    client = SentryTickets::GitHubSync.new(repo: nil, token: nil, outbox_dir: File.join(file, "nope"))
+    error = assert_raises(SentryTickets::DeliveryError) do
+      client.open_issue(title: "t", body: "b")
+    end
+    assert error.message.valid_encoding?
+  end
+
   def test_slugify
     assert_equal "nomethoderror-undefined-method-name-for-nil-nilclass-nometho",
                  SentryTickets::GitHubSync.slugify("NoMethodError: undefined method `name' for nil:NilClass (NoMethodError)")
