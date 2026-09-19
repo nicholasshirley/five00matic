@@ -41,6 +41,10 @@ TICKET_NOTICE_INTERVAL=2 ruby bin/serve.rb      # port 9292, 127.0.0.1
 
 # real delivery: set repo + token and restart
 TICKET_REPO=you/your-repo TICKET_TOKEN=ghp_xxx ruby bin/serve.rb
+
+# fingerprints that only ever existed in dry-run mode have no GitHub issue
+# number yet; their first due recurrence after the switch opens an issue
+# instead of commenting.
 ```
 
 Generate the demo payloads (runs under the RVM 3.2.0 where the 5.10 SDK lives):

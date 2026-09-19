@@ -56,7 +56,7 @@ module SentryTickets
 
       lock_for(Store.fingerprint(event)).synchronize do
         action, rec, ev = @store.ingest(event, project)
-        deliver(action, rec, ev)
+        action = deliver(action, rec, ev)
         json({
           action: action.to_s,
           count: rec["count"],
@@ -78,19 +78,34 @@ module SentryTickets
     # recorded on the record and retried on the event's next occurrence; the
     # response still reports 200 because the event is durably counted and the
     # sender (before_send returning nil) has handed off ownership.
+    # Returns the action that was actually attempted.
     def deliver(action, rec, event)
       fp = rec["fingerprint"]
       case action
       when :opened
-        r = @github.open_issue(title: Store.title_for(event), body: Ticket.new(event, rec).body)
-        @store.record_delivered(fp, number: r["number"], url: r["url"], outbox: r["outbox"])
+        open_issue(rec, event)
       when :commented
-        @github.comment(number: rec["issue_number"], body: notice_text(rec))
-        @store.record_delivered(fp)
-      when :suppressed
+        if rec["issue_number"].nil? && !@github.dry_run?
+          # The issue only ever existed in dry-run mode (state predates the
+          # token); there is no GitHub issue to comment on, so open one.
+          open_issue(rec, event)
+        else
+          @github.comment(number: rec["issue_number"], body: notice_text(rec))
+          @store.record_delivered(fp)
+          :commented
+        end
+      else # :suppressed
+        action
       end
     rescue DeliveryError => e
       @store.record_delivery_error(fp, e.message)
+      action
+    end
+
+    def open_issue(rec, event)
+      r = @github.open_issue(title: Store.title_for(event), body: Ticket.new(event, rec).body)
+      @store.record_delivered(rec["fingerprint"], number: r["number"], url: r["url"], outbox: r["outbox"])
+      :opened
     end
 
     def notice_text(rec)

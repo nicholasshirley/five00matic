@@ -33,6 +33,27 @@ class SlowGitHub
   end
 end
 
+class RecordingGitHub
+  attr_reader :opens, :comments
+
+  def initialize
+    @opens = []
+    @comments = []
+  end
+
+  def dry_run? = false
+
+  def open_issue(title:, body:)
+    @opens << title
+    { "number" => 42, "url" => "http://gh/42" }
+  end
+
+  def comment(number:, body:)
+    @comments << number
+    { "number" => number }
+  end
+end
+
 class AppTest < Minitest::Test
   def setup
     dir = Fixture.store_dir
@@ -274,6 +295,36 @@ class AppTest < Minitest::Test
     assert_equal 5, app.store.all.first["count"]
     assert_equal 1, github.opens, "concurrent first occurrences must open exactly one issue"
     assert_equal 0, github.comments
+  end
+
+  def test_dry_run_state_opens_issue_when_delivery_becomes_real
+    # README workflow: run without a token first, then "set repo + token and
+    # restart". A fingerprint only ever opened in dry-run mode has no issue
+    # number, so its first due recurrence must open, not comment on
+    # /issues//comments.
+    dir = Fixture.store_dir
+    dry = SentryTickets::App.new(
+      SentryTickets::Config.new(repo: nil, token: nil, data_dir: dir, notice_interval: 3600)
+    )
+    post(Fixture.event.to_json, {}, app: dry)
+
+    github = RecordingGitHub.new
+    real = SentryTickets::App.new(
+      SentryTickets::Config.new(repo: "you/repo", token: "t", data_dir: dir, notice_interval: 0),
+      github: github
+    )
+    status, _, body = post(Fixture.event.to_json, {}, app: real)
+    resp = JSON.parse(body.join)
+    assert_equal 200, status
+    assert_equal "opened", resp["action"]
+    assert_equal 1, github.opens.size
+    assert_empty github.comments
+    assert_equal "http://gh/42", resp["issue"]
+
+    status, _, body = post(Fixture.event.to_json, {}, app: real)
+    resp = JSON.parse(body.join)
+    assert_equal "commented", resp["action"], "follow-up recurrences comment on the real issue"
+    assert_equal [42], github.comments
   end
 
   def test_health_with_no_events
