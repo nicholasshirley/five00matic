@@ -134,7 +134,7 @@ class AppTest < Minitest::Test
   end
 
   def test_event_hash_opens_issue_in_outbox
-    status, headers, body = post(Fixture.event.to_json)
+    status, headers, body = post(Fixture.payload.to_json)
     resp = JSON.parse(body.join)
     assert_equal 200, status
     assert_equal "opened", resp["action"]
@@ -149,8 +149,8 @@ class AppTest < Minitest::Test
   end
 
   def test_recurrence_comments_when_notice_is_due
-    post(Fixture.event.to_json)
-    status, _, body = post(Fixture.event.to_json) # notice_interval=0, but...
+    post(Fixture.payload.to_json)
+    status, _, body = post(Fixture.payload.to_json) # notice_interval=0, but...
     # ...second hit sees issue_pending and last_notice_at just set -> still
     # due (0 interval) -> commented
     resp = JSON.parse(body.join)
@@ -165,8 +165,8 @@ class AppTest < Minitest::Test
   end
 
   def test_distinct_error_opens_second_issue
-    post(Fixture.event.to_json)
-    other = Fixture.event(id: "deadbeef-0000-4000-8000-000000000000", type: "RuntimeError", value: "kaput")
+    post(Fixture.payload.to_json)
+    other = Fixture.payload(id: "deadbeef-0000-4000-8000-000000000000", type: "RuntimeError", value: "kaput")
     _, _, body = post(other.to_json)
     resp = JSON.parse(body.join)
     assert_equal "opened", resp["action"]
@@ -211,7 +211,7 @@ class AppTest < Minitest::Test
   end
 
   def test_utf8_labeled_body_with_non_ascii_content_is_accepted
-    event = Fixture.event
+    event = Fixture.payload
     event["extra"] = { "note" => "café über ✓" }
     status, _, resp_body = post(event.to_json) # UTF-8-labeled, raw non-ASCII bytes
     assert_equal 200, status
@@ -234,7 +234,7 @@ class AppTest < Minitest::Test
   end
 
   def test_escaped_unicode_in_json_payload_is_accepted
-    raw = Fixture.event.to_json.sub('"pro"', '"proé"') # valid escape, still exercises render
+    raw = Fixture.payload.to_json.sub('"pro"', '"proé"') # valid escape, still exercises render
     status, _, body = post(raw)
     assert_equal 200, status
     assert_equal "opened", JSON.parse(body.join)["action"]
@@ -255,7 +255,7 @@ class AppTest < Minitest::Test
   def test_non_finite_floats_are_dropped_at_intake
     # 1e999 parses to Float::INFINITY; JSON.generate refuses it, so the
     # ticket's raw payload would otherwise fail on every delivery attempt.
-    event = Fixture.event(breadcrumbs: [Fixture.breadcrumb("http", "GET /x")])
+    event = Fixture.payload(breadcrumbs: [Fixture.breadcrumb("http", "GET /x")])
     body = event.to_json.sub("1758268800.123", "1e999")
     status, _, resp_body = post(body)
     assert_equal 200, status
@@ -266,13 +266,13 @@ class AppTest < Minitest::Test
 
   def test_delivery_failure_is_recorded_and_retried
     app = SentryTickets::App.new(@config, github: FailingGitHub.new)
-    status, _, body = post(Fixture.event.to_json, {}, app: app)
+    status, _, body = post(Fixture.payload.to_json, {}, app: app)
     resp = JSON.parse(body.join)
     assert_equal 200, status, "sender has handed off ownership; failure is recorded, not propagated"
     assert_equal "opened", resp["action"]
     assert_match(/502/, resp["issue_error"])
 
-    status, _, body = post(Fixture.event.to_json, {}, app: app)
+    status, _, body = post(Fixture.payload.to_json, {}, app: app)
     resp = JSON.parse(body.join)
     assert_equal 200, status
     assert_equal "opened", resp["action"], "failed opens retry on the next occurrence"
@@ -285,7 +285,7 @@ class AppTest < Minitest::Test
     app = SentryTickets::App.new(
       SentryTickets::Config.new(repo: nil, token: nil, data_dir: dir, notice_interval: 0)
     )
-    status, _, body = post(Fixture.event.to_json, {}, app: app)
+    status, _, body = post(Fixture.payload.to_json, {}, app: app)
     resp = JSON.parse(body.join)
     assert_equal 200, status
     assert_equal "opened", resp["action"]
@@ -300,10 +300,10 @@ class AppTest < Minitest::Test
       SentryTickets::Config.new(repo: "you/repo", token: "t", data_dir: dir, notice_interval: 0),
       github: github
     )
-    post(Fixture.event.to_json, {}, app: app)
+    post(Fixture.payload.to_json, {}, app: app)
     assert_equal 1, github.opens.size
 
-    status, _, body = post(Fixture.event.to_json, {}, app: app)
+    status, _, body = post(Fixture.payload.to_json, {}, app: app)
     resp = JSON.parse(body.join)
     assert_equal 200, status
     assert_equal "opened", resp["action"], "a 404 on comment opens a replacement issue"
@@ -320,9 +320,9 @@ class AppTest < Minitest::Test
                                 notice_interval: 0),
       github: BadCommentGitHub.new
     )
-    post(Fixture.event.to_json, {}, app: app)
+    post(Fixture.payload.to_json, {}, app: app)
 
-    status, _, body = post(Fixture.event.to_json, {}, app: app)
+    status, _, body = post(Fixture.payload.to_json, {}, app: app)
     resp = JSON.parse(body.join)
     assert_equal 200, status
     assert_equal "commented", resp["action"]
@@ -338,7 +338,7 @@ class AppTest < Minitest::Test
     app = SentryTickets::App.new(config, github: github)
 
     threads = 5.times.map do
-      Thread.new { post(Fixture.event.to_json, {}, app: app) }
+      Thread.new { post(Fixture.payload.to_json, {}, app: app) }
     end
     threads.each(&:join)
 
@@ -356,14 +356,14 @@ class AppTest < Minitest::Test
     dry = SentryTickets::App.new(
       SentryTickets::Config.new(repo: nil, token: nil, data_dir: dir, notice_interval: 3600)
     )
-    post(Fixture.event.to_json, {}, app: dry)
+    post(Fixture.payload.to_json, {}, app: dry)
 
     github = RecordingGitHub.new
     real = SentryTickets::App.new(
       SentryTickets::Config.new(repo: "you/repo", token: "t", data_dir: dir, notice_interval: 0),
       github: github
     )
-    status, _, body = post(Fixture.event.to_json, {}, app: real)
+    status, _, body = post(Fixture.payload.to_json, {}, app: real)
     resp = JSON.parse(body.join)
     assert_equal 200, status
     assert_equal "opened", resp["action"]
@@ -371,7 +371,7 @@ class AppTest < Minitest::Test
     assert_empty github.comments
     assert_equal "http://gh/42", resp["issue"]
 
-    status, _, body = post(Fixture.event.to_json, {}, app: real)
+    status, _, body = post(Fixture.payload.to_json, {}, app: real)
     resp = JSON.parse(body.join)
     assert_equal "commented", resp["action"], "follow-up recurrences comment on the real issue"
     assert_equal [42], github.comments
@@ -386,7 +386,7 @@ class AppTest < Minitest::Test
   end
 
   def test_health_and_issues
-    post(Fixture.event.to_json)
+    post(Fixture.payload.to_json)
     status, _, body = get("/health")
     assert_equal 200, status
     health = JSON.parse(body.join)
@@ -403,11 +403,11 @@ class AppTest < Minitest::Test
 
   def test_delivery_error_with_binary_message_is_scrubbed_not_wedging_state
     app = SentryTickets::App.new(@config, github: BinaryErrorGitHub.new)
-    status, _, body = post(Fixture.event.to_json, {}, app: app)
+    status, _, body = post(Fixture.payload.to_json, {}, app: app)
     assert_equal 200, status
     assert_match(/boom/, JSON.parse(body.join)["issue_error"])
 
-    status, _, body = post(Fixture.event(id: "e2", type: "RuntimeError", value: "other").to_json, {}, app: app)
+    status, _, body = post(Fixture.payload(id: "e2", type: "RuntimeError", value: "other").to_json, {}, app: app)
     assert_equal 200, status
     assert_equal "opened", JSON.parse(body.join)["action"]
   end

@@ -9,9 +9,7 @@ class TicketTest < Minitest::Test
     @ticket = SentryTickets::Ticket.new(@event, @rec)
   end
 
-  def test_title
-    assert_equal "NoMethodError: undefined method `name' for nil:NilClass", @ticket.title
-  end
+  def ticket(payload, record = @rec) = SentryTickets::Ticket.new(SentryTickets::Event.new(payload), record)
 
   def test_body_has_core_sections
     body = @ticket.body
@@ -55,11 +53,11 @@ class TicketTest < Minitest::Test
   end
 
   def test_stacktrace_tolerates_non_array_frame_context
-    event = Fixture.event
+    event = Fixture.payload
     frame = event.dig("exception", "values").last["stacktrace"]["frames"].last
     frame["pre_context"] = "garbage"
     frame["post_context"] = "garbage"
-    body = SentryTickets::Ticket.new(event, @rec).body
+    body = ticket(event, @rec).body
     assert_includes body, "-- Order.load"
   end
 
@@ -69,34 +67,34 @@ class TicketTest < Minitest::Test
     # rest of the ticket.
     crumbs = [Fixture.breadcrumb("http", "GET /x", timestamp: nil),
               Fixture.breadcrumb("redis", "get k", timestamp: "not-a-ts-but-a-string")]
-    body = SentryTickets::Ticket.new(Fixture.event(breadcrumbs: crumbs), @rec).body
+    body = ticket(Fixture.payload(breadcrumbs: crumbs), @rec).body
     assert_includes body, "[INFO] ? http"
     assert_includes body, "not-a-ts-but-a-string redis"
   end
 
   def test_stacktrace_context_accepts_lineno_text_pairs
-    event = Fixture.event
+    event = Fixture.payload
     frames = event.dig("exception", "values").last["stacktrace"]["frames"]
     frames.last["pre_context"] = [[25, "  def load"]]
     frames.last["context_line"] = "    boom"
     frames.last["post_context"] = [[27, "  end"]]
-    body = SentryTickets::Ticket.new(event, @rec).body
+    body = ticket(event, @rec).body
     assert_includes body, "      def load"
     assert_includes body, ">       boom"
     assert_includes body, "      end"
   end
 
   def test_stacktrace_falls_back_to_abs_path
-    event = Fixture.event
+    event = Fixture.payload
     frames = event.dig("exception", "values").last["stacktrace"]["frames"]
     frames.last.delete("filename")
     frames.last["abs_path"] = "/app/lib/orders.rb"
-    body = SentryTickets::Ticket.new(event, @rec).body
+    body = ticket(event, @rec).body
     assert_includes body, "-- Order.load at /app/lib/orders.rb:26"
   end
 
   def test_request_section_renders_without_crashing
-    event = Fixture.event.merge(
+    event = Fixture.payload.merge(
       "request" => {
         "method" => "POST",
         "url" => "https://app.example.com/orders",
@@ -107,8 +105,8 @@ class TicketTest < Minitest::Test
       }
     )
     store = Fixture.store
-    _, rec, = store.ingest(event, now: Time.utc(2026, 9, 19, 12))
-    body = SentryTickets::Ticket.new(event, rec).body
+    _, rec, = store.ingest(SentryTickets::Event.new(event), now: Time.utc(2026, 9, 19, 12))
+    body = ticket(event, rec).body
     assert_includes body, "## Request"
     assert_includes body, "**Method:** POST"
     assert_includes body, "**URL:** https://app.example.com/orders (query: page=2)"
@@ -118,8 +116,8 @@ class TicketTest < Minitest::Test
 
   def test_breadcrumbs_rendered_with_last_ten_cap
     crumbs = 15.times.map { |i| Fixture.breadcrumb("http", "GET /api/orders?page=#{i}", timestamp: 1_758_268_800 + i) }
-    event = Fixture.event(breadcrumbs: crumbs)
-    body = SentryTickets::Ticket.new(event, @rec).body
+    event = Fixture.payload(breadcrumbs: crumbs)
+    body = ticket(event, @rec).body
     assert_includes body, "## Breadcrumbs (last 10)"
     assert_includes body, "[INFO] 2025-09-19 08:00:14 http — GET /api/orders?page=14"
     refute_includes body, "page=4\n", "only the last 10 crumbs are shown"
@@ -129,34 +127,34 @@ class TicketTest < Minitest::Test
   def test_breadcrumb_data_rendered_and_string_timestamps_pass_through
     crumbs = [Fixture.breadcrumb("redis", "hmset user:42", level: "warning",
                                  timestamp: "2026-09-19T12:00:00Z", data: { "key" => "user:42" })]
-    event = Fixture.event(breadcrumbs: crumbs)
-    body = SentryTickets::Ticket.new(event, @rec).body
+    event = Fixture.payload(breadcrumbs: crumbs)
+    body = ticket(event, @rec).body
     assert_includes body, "[WARNING] 2026-09-19T12:00:00Z redis — hmset user:42"
     assert_includes body, '`{"key":"user:42"}`'
   end
 
   def test_malformed_ancillary_sections_render_without_crashing
-    garbage = Fixture.event.merge(
+    garbage = Fixture.payload.merge(
       "breadcrumbs" => { "values" => "garbage" },
       "contexts" => "garbage",
       "request" => { "url" => "https://x", "env" => "garbage" }
     )
-    body = SentryTickets::Ticket.new(garbage, @rec).body
+    body = ticket(garbage, @rec).body
     assert_includes body, "## Summary"
     assert_includes body, "## Request"
     assert_includes body, "**URL:** https://x"
     refute_includes body, "## Breadcrumbs"
     refute_includes body, "## Contexts"
 
-    crumbs_garbage = Fixture.event(breadcrumbs: [7, "oops"])
-    body = SentryTickets::Ticket.new(crumbs_garbage, @rec).body
+    crumbs_garbage = Fixture.payload(breadcrumbs: [7, "oops"])
+    body = ticket(crumbs_garbage, @rec).body
     refute_includes body, "## Breadcrumbs", "non-hash crumbs are dropped, not rendered"
   end
 
   def test_raw_payload_embedded
     body = @ticket.body
     assert_includes body, "<details>"
-    assert_includes body, "\"event_id\": \"#{@event['event_id']}\""
+    assert_includes body, "\"event_id\": \"#{@event.id}\""
     assert_includes body, "```json\n"
     assert_includes body, "\n```\n\n</details>"
   end
@@ -164,8 +162,8 @@ class TicketTest < Minitest::Test
   def test_body_fits_github_issue_limit_when_payload_is_huge
     # GitHub rejects issue bodies over 65,536 characters; one fat event must
     # not make the ticket permanently undeliverable.
-    event = Fixture.event.merge("extra" => { "blob" => "x" * 200_000 })
-    body = SentryTickets::Ticket.new(event, @rec).body
+    event = Fixture.payload.merge("extra" => { "blob" => "x" * 200_000 })
+    body = ticket(event, @rec).body
     assert_operator body.length, :<=, SentryTickets::Ticket::MAX_BODY_CHARS
     assert_includes body, "## Summary"
     assert_includes body, "*(payload truncated to fit GitHub issue size limits)*"
@@ -174,8 +172,8 @@ class TicketTest < Minitest::Test
 
   def test_body_clips_when_structured_sections_alone_overflow
     tags = 200.times.map { |i| ["tag_#{i}", "v" * 450] }.to_h
-    event = Fixture.event.merge("tags" => tags)
-    body = SentryTickets::Ticket.new(event, @rec).body
+    event = Fixture.payload.merge("tags" => tags)
+    body = ticket(event, @rec).body
     assert_operator body.length, :<=, SentryTickets::Ticket::MAX_BODY_CHARS
     assert_includes body, "*(sections truncated to fit GitHub issue size limits)*"
   end

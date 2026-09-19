@@ -15,7 +15,8 @@ installed under RVM Ruby 3.2.0, but the code runs on plain modern Ruby
 ```
 lib/sentry_tickets.rb          entry point
 lib/sentry_tickets/config.rb   env-driven configuration
-lib/sentry_tickets/store.rb    fingerprint, counts, throttle anchors (JSON file)
+lib/sentry_tickets/event.rb    the SDK payload: fingerprint, title, sections
+lib/sentry_tickets/store.rb    counts, throttle anchors (JSON file)
 lib/sentry_tickets/ticket.rb   GitHub-issue markdown rendering
 lib/sentry_tickets/github_sync.rb  thin REST client + dry-run outbox
 lib/sentry_tickets/app.rb      the RACK app (POST /events, GET /health, /issues)

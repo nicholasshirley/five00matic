@@ -38,7 +38,7 @@ class ServeTest < Minitest::Test
   end
 
   def test_event_hash_opens_issue_in_outbox
-    res = http_post(Fixture.event.to_json)
+    res = http_post(Fixture.payload.to_json)
     assert_equal 200, res.code.to_i
     assert_equal "opened", JSON.parse(res.body)["action"]
     assert_equal 1, Dir[File.join(@dir, "outbox", "issue-*.md")].size

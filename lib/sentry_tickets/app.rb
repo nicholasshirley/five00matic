@@ -50,7 +50,7 @@ module SentryTickets
       event, error = extract_event(env)
       return json({ error: error }, status: 400) if event.nil?
 
-      lock_for(Store.fingerprint(event)).synchronize do
+      lock_for(event.fingerprint).synchronize do
         action, rec, ev = @store.ingest(event)
         action = deliver(action, rec, ev)
         json({
@@ -106,7 +106,7 @@ module SentryTickets
     end
 
     def open_issue(rec, event)
-      r = @github.open_issue(title: Store.title_for(event), body: Ticket.new(event, rec).body)
+      r = @github.open_issue(title: event.title, body: Ticket.new(event, rec).body)
       @store.record_delivered(rec["fingerprint"], number: r["number"], url: r["url"], outbox: r["outbox"])
       :opened
     end
@@ -137,8 +137,8 @@ module SentryTickets
       end
       return [nil, BAD_PAYLOAD_ERROR] unless event.is_a?(Hash)
 
-      event = normalize(event)
-      return [nil, NO_SIGNAL_ERROR] unless error_event?(event)
+      event = Event.new(normalize(event))
+      return [nil, NO_SIGNAL_ERROR] unless event.reportable?
 
       [event, nil]
     end
@@ -193,14 +193,6 @@ module SentryTickets
       st["frames"].each do |f|
         %w[pre_context post_context].each { |k| f.delete(k) unless f[k].is_a?(Array) }
       end
-    end
-
-    # After normalize, a present "exception" is usable. Anything else needs a
-    # non-blank message: without one there is nothing to group on, and every
-    # such event would collide on the digest of the empty fingerprint.
-    def error_event?(event)
-      return true if event["exception"].is_a?(Hash)
-      !event["message"].to_s.strip.empty?
     end
 
     def json(payload, status: 200)

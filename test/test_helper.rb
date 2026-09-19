@@ -24,7 +24,7 @@ module Fixture
     f
   end
 
-  def self.event(
+  def self.payload(
     id: "e0f1a2b3-c4d5-4e6f-a7b8-9c0d1e2f3a4b",
     type: "NoMethodError",
     value: "undefined method `name' for nil:NilClass",
@@ -62,6 +62,10 @@ module Fixture
       # SDK shape: breadcrumbs.values with epoch-float timestamps.
       event["breadcrumbs"] = { "values" => breadcrumbs } if breadcrumbs
     end
+  end
+
+  def self.event(**payload_options)
+    SentryTickets::Event.new(payload(**payload_options))
   end
 
   def self.breadcrumb(category, message, timestamp: 1_758_268_800.123, level: "info", data: nil)

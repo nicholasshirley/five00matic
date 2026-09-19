@@ -5,6 +5,7 @@ require "digest/sha2"
 require "time"
 
 require_relative "sentry_tickets/config"
+require_relative "sentry_tickets/event"
 require_relative "sentry_tickets/store"
 require_relative "sentry_tickets/ticket"
 require_relative "sentry_tickets/github_sync"
