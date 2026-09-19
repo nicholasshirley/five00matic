@@ -104,19 +104,6 @@ class StoreTest < Minitest::Test
     assert_equal 9, reloaded.all.first["issue_number"]
   end
 
-  def test_delivery_error_is_scrubbed_to_valid_utf8
-    dir = Fixture.store_dir
-    store = Fixture.store(dir)
-    fp = Fixture.event.fingerprint
-    store.ingest(Fixture.event, now: T0)
-    store.record_delivery_error(fp, "boom: \xFF\xFE".b)
-
-    assert store.all.first["last_error"].valid_encoding?
-    reloaded = Fixture.store(dir)
-    assert reloaded.all.first["last_error"].valid_encoding?,
-           "state must reload and re-serialize after a binary error message"
-  end
-
   def test_state_file_is_owner_readable_only
     dir = Fixture.store_dir
     store = Fixture.store(dir)

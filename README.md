@@ -105,6 +105,10 @@ Notes:
   between occurrences of one bug (a deploy shifts lines; messages carry ids
   and, on Ruby 3.2, object addresses; tags carry request ids). The message
   is used only for an exception with no stack trace, or a message event.
+- **Rejected with 400**: a body that is not a JSON object, one holding
+  invalid UTF-8 or a non-finite number (the SDK can produce neither), and an
+  event with neither an exception nor a message. Sections of an unexpected
+  shape are otherwise read as empty rather than refused.
 - **First occurrence** of a fingerprint: an issue is opened immediately
   (count is 1).
 - **Recurrences**: count increments on every event, but a GitHub notification

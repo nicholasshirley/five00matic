@@ -64,6 +64,13 @@ class GitHubSyncTest < Minitest::Test
     assert error.message.valid_encoding?
   end
 
+  def test_delivery_error_messages_are_valid_utf8
+    # Net::HTTP labels bodies binary; valid multibyte text must survive and
+    # invalid bytes must not reach the JSON state file.
+    assert_equal "GitHub API 422: café", SentryTickets::DeliveryError.new("GitHub API 422: café".b).message
+    assert_equal "boom: ��", SentryTickets::DeliveryError.new("boom: \xFF\xFE".b).message
+  end
+
   def test_slugify
     assert_equal "nomethoderror-undefined-method-name-for-nil-nilclass-nometho",
                  SentryTickets::GitHubSync.slugify("NoMethodError: undefined method `name' for nil:NilClass (NoMethodError)")

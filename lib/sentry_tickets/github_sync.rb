@@ -11,9 +11,12 @@ module SentryTickets
     # The HTTP status GitHub answered with, when there was a response at all.
     attr_reader :status
 
+    # The message is persisted in state and echoed in responses, both JSON,
+    # but its text can come from anywhere: Net::HTTP labels response bodies
+    # binary, and a middlebox's garbage lands in a parser error's message.
     def initialize(message = nil, status: nil)
       @status = status
-      super(message)
+      super(message&.dup&.force_encoding(Encoding::UTF_8)&.scrub)
     end
   end
 
@@ -72,13 +75,6 @@ module SentryTickets
       text.downcase.gsub(/[^a-z0-9]+/, "-").gsub(/\A-+|-+\z/, "")[0, 60]
     end
 
-    # Error text that can come back over the wire is binary-labeled by
-    # Net::HTTP; anything persisted in state or echoed in a response must be
-    # valid UTF-8 first.
-    def self.scrub(string)
-      string.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD")
-    end
-
     private
 
     def request(method, path, payload = nil)
@@ -97,7 +93,7 @@ module SentryTickets
 
       res = http.request(req)
       unless res.code.to_i.between?(200, 299)
-        detail = self.class.scrub(res.body.to_s)[0, 300]
+        detail = res.body.to_s[0, 300]
         raise DeliveryError.new("GitHub API #{res.code}: #{detail}", status: res.code.to_i)
       end
 
@@ -105,10 +101,7 @@ module SentryTickets
     rescue DeliveryError
       raise
     rescue StandardError => e
-      # Parser and network failures can carry raw bytes (a middlebox's
-      # garbage 200 body lands in the JSON::ParserError message); the
-      # message is persisted in state, so it must always be valid UTF-8.
-      raise DeliveryError, self.class.scrub("#{e.class}: #{e.message}")
+      raise DeliveryError, "#{e.class}: #{e.message}"
     end
 
     def outbox_write(kind, title, text)
@@ -126,7 +119,7 @@ module SentryTickets
     rescue SystemCallError, IOError => e
       # Match the network path: a failed delivery is recorded and retried on
       # the next occurrence, it does not 500 the ingest.
-      raise DeliveryError, self.class.scrub("#{e.class}: #{e.message}")
+      raise DeliveryError, "#{e.class}: #{e.message}"
     end
   end
 end

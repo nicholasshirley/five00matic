@@ -6,8 +6,7 @@ module SentryTickets
   # The deliverable: POST /events accepts the event hash a before_send hook
   # has, and answers with what happened to it.
   class App
-    BAD_PAYLOAD_ERROR = "unrecognized payload (expected Sentry event JSON)"
-    NO_SIGNAL_ERROR = "event has no exception or message"
+    InvalidPayload = Class.new(StandardError)
 
     def initialize(config, store: nil, github: nil)
       @store = store || Store.new(data_dir: config.data_dir, notice_interval: config.notice_interval)
@@ -47,9 +46,7 @@ module SentryTickets
     private
 
     def handle_events(env)
-      event, error = extract_event(env)
-      return json({ error: error }, status: 400) if event.nil?
-
+      event = parse(env["rack.input"]&.read.to_s)
       lock_for(event.fingerprint).synchronize do
         action, rec, ev = @store.ingest(event)
         action = deliver(action, rec, ev)
@@ -63,6 +60,8 @@ module SentryTickets
           issue_error: rec["last_error"]
         })
       end
+    rescue InvalidPayload => e
+      json({ error: e.message }, status: 400)
     end
 
     def lock_for(fp)
@@ -120,79 +119,23 @@ module SentryTickets
         "- Latest seen: #{rec['last_seen']} (event `#{rec['last_event_id']}`)"
     end
 
-    # Returns [event, error]. A nil event carries the reason in error.
-    def extract_event(env)
-      raw = env["rack.input"]
-      raw = raw.respond_to?(:read) ? raw.read : raw
-      # Rack servers hand over binary bodies, but embedded callers may not;
-      # normalize so encoding-sensitive calls (strip, JSON.parse) behave like
-      # the deployed path whatever the input's label.
-      body = raw.to_s.b
-      return [nil, BAD_PAYLOAD_ERROR] if body.strip.empty?
+    def parse(body)
+      data = JSON.parse(body)
+      raise InvalidPayload, "unrecognized payload (expected Sentry event JSON)" unless data.is_a?(Hash)
 
-      begin
-        event = JSON.parse(body)
-      rescue JSON::ParserError
-        return [nil, BAD_PAYLOAD_ERROR]
-      end
-      return [nil, BAD_PAYLOAD_ERROR] unless event.is_a?(Hash)
+      # The ticket embeds the payload as JSON and the state file keeps parts
+      # of it, but JSON.parse accepts what JSON.generate refuses: invalid
+      # UTF-8 and numbers like 1e999. The SDK builds its payload with
+      # JSON.generate, so anything failing here was not sent by it.
+      JSON.generate(data)
+      event = Event.new(data)
+      raise InvalidPayload, "event has no exception or message" unless event.reportable?
 
-      event = Event.new(normalize(event))
-      return [nil, NO_SIGNAL_ERROR] unless event.reportable?
-
-      [event, nil]
-    end
-
-    # JSON.parse trusts the source encoding: a body that is not valid UTF-8
-    # yields strings with invalid bytes, which later crash JSON generation in
-    # the ticket renderer — or ride along raw when the source was
-    # binary-labeled, making GitHub reject the delivery with 400. Normalize
-    # every string, keys included, so one bad event cannot wedge the pipeline
-    # for its fingerprint.
-    def scrub_encoding(obj)
-      case obj
-      when Hash
-        obj.each_with_object({}) { |(k, v), h| h[scrub_encoding(k)] = scrub_encoding(v) }
-      when Array
-        obj.map { |v| scrub_encoding(v) }
-      when String
-        obj.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD")
-      when Float
-        # 1e999/-1e999 in the payload parse as infinities (and a NaN literal
-        # with a permissive parser), which JSON.generate then refuses; the
-        # ticket's raw-payload section would fail on every delivery attempt.
-        obj.finite? ? obj : nil
-      else obj
-      end
-    end
-
-    # Fingerprinting and rendering assume the SDK's shapes and crash on
-    # garbage (Hash#dig into a String, Integer#[]). Strip structurally
-    # invalid pieces instead of 500ing; whatever survives is real signal.
-    def normalize(event)
-      scrub_encoding(event).tap { |ev| normalize_exception(ev) }
-    end
-
-    def normalize_exception(event)
-      ex = event["exception"]
-      return event.delete("exception") unless ex.is_a?(Hash)
-
-      values = ex["values"].is_a?(Array) ? ex["values"].grep(Hash) : nil
-      return event.delete("exception") if values.nil? || values.empty?
-
-      values.each { |v| normalize_exception_value(v) }
-      ex["values"] = values
-    end
-
-    def normalize_exception_value(v)
-      st = v["stacktrace"]
-      return v.delete("stacktrace") unless st.is_a?(Hash)
-
-      return unless st["frames"].is_a?(Array)
-      st["frames"] = st["frames"].grep(Hash)
-      st["frames"].each do |f|
-        %w[pre_context post_context].each { |k| f.delete(k) unless f[k].is_a?(Array) }
-      end
+      event
+    rescue JSON::ParserError
+      raise InvalidPayload, "unrecognized payload (expected Sentry event JSON)"
+    rescue JSON::GeneratorError
+      raise InvalidPayload, "payload holds invalid UTF-8 or a non-finite number"
     end
 
     def json(payload, status: 200)

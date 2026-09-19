@@ -191,7 +191,7 @@ class AppTest < Minitest::Test
     assert_equal 400, status
   end
 
-  def test_malformed_exception_shapes_are_sanitized_not_500
+  def test_malformed_shapes_are_tolerated_not_500
     payloads = [
       '{"message":"m1","exception":"garbage"}',
       '{"message":"m2","exception":{"values":[{"type":"E","stacktrace":"garbage"}]}}',
@@ -207,7 +207,7 @@ class AppTest < Minitest::Test
       assert_equal 200, status, raw
       assert_equal "opened", JSON.parse(body.join)["action"], raw
     end
-    assert_equal payloads.size, outbox_files.size, "each sanitized event opens its own ticket"
+    assert_equal payloads.size, outbox_files.size, "each event opens its own ticket"
   end
 
   def test_utf8_labeled_body_with_non_ascii_content_is_accepted
@@ -219,12 +219,18 @@ class AppTest < Minitest::Test
     assert_includes File.read(outbox_files.first), "café über ✓"
   end
 
-  def test_invalid_utf8_in_json_keys_is_scrubbed
-    body = (+"{\"caf\xE9\":1,\"message\":\"ok\"}").force_encoding(Encoding::UTF_8)
-    status, _, resp_body = post(body)
-    assert_equal 200, status
-    outbox = File.read(outbox_files.first)
-    assert_includes outbox, "caf\uFFFD", "invalid key bytes must be replaced, not crash or leak raw"
+  def test_payloads_the_sdk_could_not_have_built_are_rejected
+    # JSON.parse lets these through but JSON.generate refuses them, and the
+    # ticket and state file are both written with JSON.generate.
+    invalid_utf8_key = (+"{\"caf\xE9\":1,\"message\":\"ok\"}").force_encoding(Encoding::UTF_8)
+    binary_value = "{\"message\":\"caf\xE9\"}".b
+    infinite = Fixture.payload(breadcrumbs: [Fixture.breadcrumb("http", "GET /x")]).to_json.sub("1758268800.123", "1e999")
+    [invalid_utf8_key, binary_value, infinite].each do |body|
+      status, _, resp_body = post(body)
+      assert_equal 400, status, body
+      assert_equal "payload holds invalid UTF-8 or a non-finite number", JSON.parse(resp_body.join)["error"]
+    end
+    assert_empty outbox_files
   end
 
   def test_unknown_route_is_404
@@ -238,30 +244,6 @@ class AppTest < Minitest::Test
     status, _, body = post(raw)
     assert_equal 200, status
     assert_equal "opened", JSON.parse(body.join)["action"]
-  end
-
-  def test_binary_payload_bytes_are_scrubbed
-    # A body with raw high bytes in a string parses (JSON.parse labels it
-    # UTF-8 without validating) and used to crash JSON.pretty_generate.
-    body = "{\"event_id\":\"e1\",\"message\":\"caf\xE9\",\"extra\":{\"blob\":\"\xFE\"}}".b
-    status, _, resp_body = post(body)
-    assert_equal 200, status
-    resp = JSON.parse(resp_body.join)
-    assert_equal "opened", resp["action"]
-    outbox = File.read(outbox_files.first)
-    assert_includes outbox, "caf\uFFFD" # replacement char, not a crash
-  end
-
-  def test_non_finite_floats_are_dropped_at_intake
-    # 1e999 parses to Float::INFINITY; JSON.generate refuses it, so the
-    # ticket's raw payload would otherwise fail on every delivery attempt.
-    event = Fixture.payload(breadcrumbs: [Fixture.breadcrumb("http", "GET /x")])
-    body = event.to_json.sub("1758268800.123", "1e999")
-    status, _, resp_body = post(body)
-    assert_equal 200, status
-    assert_equal "opened", JSON.parse(resp_body.join)["action"]
-    ticket = File.read(outbox_files.first)
-    assert_includes ticket, "[INFO] ? http", "the non-finite timestamp renders as unknown"
   end
 
   def test_delivery_failure_is_recorded_and_retried
