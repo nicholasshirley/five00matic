@@ -65,7 +65,10 @@ module SentryTickets
       @mutex.synchronize do
         rec = @state[fp]
         return if rec.nil?
-        rec["last_error"] = message
+        # An invalid-encoding message would raise JSON::GeneratorError on the
+        # next persist! and every one after; keep state serializable.
+        rec["last_error"] =
+          message.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD")
         persist!
       end
     end

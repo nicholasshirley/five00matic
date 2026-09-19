@@ -12,6 +12,18 @@ class FailingGitHub
   end
 end
 
+# Delivers errors with raw binary bytes in the message, the way a wrapped
+# JSON::ParserError on a middlebox's garbage response body would.
+class BinaryErrorGitHub
+  def open_issue(title:, body:)
+    raise SentryTickets::DeliveryError, "boom: \xFF\xFE".b
+  end
+
+  def comment(number:, body:)
+    raise SentryTickets::DeliveryError, "boom: \xFF\xFE".b
+  end
+end
+
 class SlowGitHub
   attr_reader :opens, :comments
 
@@ -355,5 +367,29 @@ class AppTest < Minitest::Test
     _, _, body = post(Fixture.event.to_json, { "HTTP_X_SENTRY_PROJECT" => "42" })
     resp = JSON.parse(body.join)
     assert_equal "42", resp["project"]
+  end
+
+  def test_project_header_with_invalid_bytes_is_scrubbed_not_wedging_state
+    status, _, body = post(Fixture.event.to_json, { "HTTP_X_SENTRY_PROJECT" => "bad\xFFproj".b })
+    assert_equal 200, status
+    assert_equal "bad�proj", JSON.parse(body.join)["project"]
+
+    # the poisoned project string used to raise JSON::GeneratorError on
+    # every subsequent persist, so a second, distinct event must still work
+    status, _, body = post(Fixture.event(id: "e2", type: "RuntimeError", value: "other").to_json)
+    assert_equal 200, status
+    assert_equal "opened", JSON.parse(body.join)["action"]
+    assert_equal 2, @app.store.tracked
+  end
+
+  def test_delivery_error_with_binary_message_is_scrubbed_not_wedging_state
+    app = SentryTickets::App.new(@config, github: BinaryErrorGitHub.new)
+    status, _, body = post(Fixture.event.to_json, {}, app: app)
+    assert_equal 200, status
+    assert_match(/boom/, JSON.parse(body.join)["issue_error"])
+
+    status, _, body = post(Fixture.event(id: "e2", type: "RuntimeError", value: "other").to_json, {}, app: app)
+    assert_equal 200, status
+    assert_equal "opened", JSON.parse(body.join)["action"]
   end
 end

@@ -64,6 +64,13 @@ module SentryTickets
       text.downcase.gsub(/[^a-z0-9]+/, "-").gsub(/\A-+|-+\z/, "")[0, 60]
     end
 
+    # Error text that can come back over the wire is binary-labeled by
+    # Net::HTTP; anything persisted in state or echoed in a response must be
+    # valid UTF-8 first.
+    def self.scrub(string)
+      string.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD")
+    end
+
     private
 
     def request(method, path, payload = nil)
@@ -82,18 +89,18 @@ module SentryTickets
 
       res = http.request(req)
       unless res.code.to_i.between?(200, 299)
-        # Net::HTTP leaves the body in binary encoding; normalize it before
-        # the message lands in state (it is re-serialized to JSON in
-        # responses) or a non-UTF-8 response could wedge that too.
-        detail = res.body.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
-        raise DeliveryError, "GitHub API #{res.code}: #{detail[0, 300]}"
+        detail = self.class.scrub(res.body.to_s)[0, 300]
+        raise DeliveryError, "GitHub API #{res.code}: #{detail}"
       end
 
       JSON.parse(res.body)
     rescue DeliveryError
       raise
     rescue StandardError => e
-      raise DeliveryError, "#{e.class}: #{e.message}"
+      # Parser and network failures can carry raw bytes (a middlebox's
+      # garbage 200 body lands in the JSON::ParserError message); the
+      # message is persisted in state, so it must always be valid UTF-8.
+      raise DeliveryError, self.class.scrub("#{e.class}: #{e.message}")
     end
 
     def outbox_write(kind, title, text)

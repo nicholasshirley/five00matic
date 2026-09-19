@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
+require "socket"
 
 class GitHubSyncTest < Minitest::Test
   def setup
@@ -61,5 +62,36 @@ class GitHubSyncTest < Minitest::Test
       client.open_issue(title: "t", body: "b")
     end
     assert_match(/connection refused/i, error.message)
+  end
+
+  # A middlebox can answer GitHub's 2xx with a non-JSON, non-UTF-8 body; the
+  # JSON::ParserError message then carries raw bytes, and would otherwise
+  # land in state and break every future persist.
+  def test_garbage_success_body_wraps_with_valid_utf8_message
+    server = TCPServer.new("127.0.0.1", 0)
+    port = server.addr[1]
+    t = Thread.new do
+      sock = server.accept
+      sock.gets
+      headers = {}
+      headers[$1.downcase] = $2.strip while (line = sock.gets) != "\r\n" && line =~ /\A([^:]+): (.*)\z/
+      sock.read(headers["content-length"].to_i) if headers["content-length"]
+      sock.write "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 6\r\n" \
+                 "Connection: close\r\n\r\n"
+      sock.write "\xFF\xFEbad!".b
+      sock.close
+    end
+
+    client = SentryTickets::GitHubSync.new(
+      repo: "you/repo", token: "t", api_base: "http://127.0.0.1:#{port}", outbox_dir: @outbox
+    )
+    error = assert_raises(SentryTickets::DeliveryError) do
+      client.open_issue(title: "t", body: "b")
+    end
+    assert error.message.valid_encoding?,
+           "wrapped error must be valid UTF-8, got #{error.message.inspect}"
+  ensure
+    t.join
+    server.close
   end
 end

@@ -150,6 +150,11 @@ module SentryTickets
         event, project = parsed, (env["HTTP_X_SENTRY_PROJECT"] || "default")
       end
 
+      # Project is persisted and echoed back, but never passed through
+      # normalize: X-Sentry-Project is a raw header, and an invalid-encoding
+      # byte sequence would raise JSON::GeneratorError on the next persist
+      # and wedge the store.
+      project = scrub_encoding(project)
       event = normalize(event)
       return [nil, nil, NO_SIGNAL_ERROR] unless error_event?(event)
 
