@@ -18,7 +18,8 @@ lib/sentry_tickets/config.rb   env-driven configuration
 lib/sentry_tickets/event.rb    the SDK payload: fingerprint, title, sections
 lib/sentry_tickets/store.rb    counts, throttle anchors (JSON file)
 lib/sentry_tickets/ticket.rb   GitHub-issue markdown rendering
-lib/sentry_tickets/github_sync.rb  thin REST client + dry-run outbox
+lib/sentry_tickets/github.rb   thin GitHub REST client
+lib/sentry_tickets/outbox.rb   dry-run stand-in: tickets as markdown files
 lib/sentry_tickets/app.rb      the RACK app (POST /events, GET /health, /issues)
 bin/serve.rb                   zero-dependency standalone server (stdlib TCPServer)
 config.ru                      RACK entry (puma/rackup) for a real deployment, mounted at /sentry

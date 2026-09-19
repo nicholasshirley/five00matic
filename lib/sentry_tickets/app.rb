@@ -8,15 +8,9 @@ module SentryTickets
   class App
     InvalidPayload = Class.new(StandardError)
 
-    def initialize(config, store: nil, github: nil)
+    def initialize(config, store: nil, destination: nil)
       @store = store || Store.new(data_dir: config.data_dir, notice_interval: config.notice_interval)
-      @github = github || GitHubSync.new(
-        repo: config.repo,
-        token: config.token,
-        labels: config.labels,
-        api_base: config.api_base,
-        outbox_dir: File.join(config.data_dir, "outbox")
-      )
+      @destination = destination || destination_for(config)
       # Serializes ingest -> deliver per fingerprint. The standalone server
       # (bin/serve.rb) handles each connection on its own thread, and without
       # this two concurrent first occurrences of one error would both see
@@ -25,7 +19,7 @@ module SentryTickets
       @locks_mutex = Mutex.new
     end
 
-    attr_reader :store, :github
+    attr_reader :store, :destination
 
     def call(env)
       method = env["REQUEST_METHOD"]
@@ -35,7 +29,7 @@ module SentryTickets
         handle_events(env)
       elsif method == "GET" && path == "/health"
         json({ status: "ok", version: SentryTickets::VERSION,
-               dry_run: @github.dry_run?, tracked: @store.tracked })
+               dry_run: @destination.dry_run?, tracked: @store.tracked })
       elsif method == "GET" && path == "/issues"
         json(@store.all)
       else
@@ -44,6 +38,12 @@ module SentryTickets
     end
 
     private
+
+    def destination_for(config)
+      return Outbox.new(File.join(config.data_dir, "outbox")) if config.dry_run?
+
+      GitHub.new(repo: config.repo, token: config.token, labels: config.labels, api_base: config.api_base)
+    end
 
     def handle_events(env)
       event = parse(env["rack.input"]&.read.to_s)
@@ -79,13 +79,13 @@ module SentryTickets
       when :opened
         open_issue(rec, event)
       when :commented
-        if rec["issue_number"].nil? && !@github.dry_run?
+        if rec["issue_number"].nil? && !@destination.dry_run?
           # The issue only ever existed in dry-run mode (state predates the
           # token); there is no GitHub issue to comment on, so open one.
           open_issue(rec, event)
         else
           begin
-            @github.comment(number: rec["issue_number"], body: notice_text(rec))
+            @destination.comment(number: rec["issue_number"], body: notice_text(rec))
             @store.record_delivered(fp)
             :commented
           rescue DeliveryError => e
@@ -105,7 +105,7 @@ module SentryTickets
     end
 
     def open_issue(rec, event)
-      r = @github.open_issue(title: event.title, body: Ticket.new(event, rec).body)
+      r = @destination.open_issue(title: event.title, body: Ticket.new(event, rec).body)
       @store.record_delivered(rec["fingerprint"], number: r["number"], url: r["url"], outbox: r["outbox"])
       :opened
     end

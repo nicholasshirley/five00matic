@@ -130,7 +130,7 @@ class AppTest < Minitest::Test
   end
 
   def test_dry_run_without_token
-    assert @app.github.dry_run?
+    assert @app.destination.dry_run?
   end
 
   def test_event_hash_opens_issue_in_outbox
@@ -247,7 +247,7 @@ class AppTest < Minitest::Test
   end
 
   def test_delivery_failure_is_recorded_and_retried
-    app = SentryTickets::App.new(@config, github: FailingGitHub.new)
+    app = SentryTickets::App.new(@config, destination: FailingGitHub.new)
     status, _, body = post(Fixture.payload.to_json, {}, app: app)
     resp = JSON.parse(body.join)
     assert_equal 200, status, "sender has handed off ownership; failure is recorded, not propagated"
@@ -280,7 +280,7 @@ class AppTest < Minitest::Test
     github = GoneCommentGitHub.new
     app = SentryTickets::App.new(
       SentryTickets::Config.new(repo: "you/repo", token: "t", data_dir: dir, notice_interval: 0),
-      github: github
+      destination: github
     )
     post(Fixture.payload.to_json, {}, app: app)
     assert_equal 1, github.opens.size
@@ -300,7 +300,7 @@ class AppTest < Minitest::Test
     app = SentryTickets::App.new(
       SentryTickets::Config.new(repo: "you/repo", token: "t", data_dir: Fixture.store_dir,
                                 notice_interval: 0),
-      github: BadCommentGitHub.new
+      destination: BadCommentGitHub.new
     )
     post(Fixture.payload.to_json, {}, app: app)
 
@@ -317,7 +317,7 @@ class AppTest < Minitest::Test
     dir = Fixture.store_dir
     config = SentryTickets::Config.new(repo: "x/y", token: "t", data_dir: dir, notice_interval: 3600)
     github = SlowGitHub.new
-    app = SentryTickets::App.new(config, github: github)
+    app = SentryTickets::App.new(config, destination: github)
 
     threads = 5.times.map do
       Thread.new { post(Fixture.payload.to_json, {}, app: app) }
@@ -343,7 +343,7 @@ class AppTest < Minitest::Test
     github = RecordingGitHub.new
     real = SentryTickets::App.new(
       SentryTickets::Config.new(repo: "you/repo", token: "t", data_dir: dir, notice_interval: 0),
-      github: github
+      destination: github
     )
     status, _, body = post(Fixture.payload.to_json, {}, app: real)
     resp = JSON.parse(body.join)
@@ -384,7 +384,7 @@ class AppTest < Minitest::Test
   end
 
   def test_delivery_error_with_binary_message_is_scrubbed_not_wedging_state
-    app = SentryTickets::App.new(@config, github: BinaryErrorGitHub.new)
+    app = SentryTickets::App.new(@config, destination: BinaryErrorGitHub.new)
     status, _, body = post(Fixture.payload.to_json, {}, app: app)
     assert_equal 200, status
     assert_match(/boom/, JSON.parse(body.join)["issue_error"])

@@ -28,6 +28,9 @@ module SentryTickets
       @api_base = api_base.chomp("/")
     end
 
+    # Without both a repo and a token, tickets go to the outbox directory.
+    def dry_run? = repo.nil? || token.nil?
+
     def self.blank_to_nil(value)
       value.nil? || value.strip.empty? ? nil : value
     end

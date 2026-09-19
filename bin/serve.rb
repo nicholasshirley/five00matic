@@ -71,7 +71,7 @@ app = SentryTickets::App.new(config)
 server = TCPServer.new(ENV.fetch("TICKET_HOST", "127.0.0.1"), ENV.fetch("TICKET_PORT", "9292").to_i)
 
 $stderr.puts "[sentry-tickets] listening on http://#{ENV.fetch("TICKET_HOST", "127.0.0.1")}:#{ENV.fetch("TICKET_PORT", "9292")} " \
-              "(dry_run=#{app.github.dry_run?}, data=#{File.expand_path(config.data_dir)})"
+              "(dry_run=#{app.destination.dry_run?}, data=#{File.expand_path(config.data_dir)})"
 trap("INT") { exit! }
 trap("TERM") { exit! }
 
