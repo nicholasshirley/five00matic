@@ -138,6 +138,61 @@ class AppTest < Minitest::Test
     assert_includes JSON.parse(body.join)["error"], "unrecognized"
   end
 
+  def test_event_without_exception_or_message_is_rejected
+    # every such event would otherwise collide on the digest of the empty
+    # fingerprint, merging unrelated payloads into one ticket
+    status, _, body = post({ "event_id" => "x" }.to_json)
+    assert_equal 400, status
+    assert_equal "event has no exception or message", JSON.parse(body.join)["error"]
+
+    status, = post({ "message" => "   " }.to_json)
+    assert_equal 400, status
+  end
+
+  def test_malformed_exception_shapes_are_sanitized_not_500
+    payloads = [
+      '{"message":"m1","exception":"garbage"}',
+      '{"message":"m2","exception":{"values":[{"type":"E","stacktrace":"garbage"}]}}',
+      '{"message":"m3","exception":{"values":[7]}}',
+      '{"message":"m4","exception":{"values":[]}}',
+      '{"exception":{"values":[{"type":"E1","value":"v","stacktrace":{"frames":[1]}}]}}',
+      '{"exception":{"values":[{"type":"E2","value":"v","stacktrace":{"frames":[{"pre_context":"garbage","context_line":"  boom","post_context":"garbage"}]}}]}}',
+      '{"message":"m5","breadcrumbs":{"values":"garbage"}}',
+      '{"message":"m6","request":{"env":"garbage"},"contexts":"garbage"}'
+    ]
+    payloads.each do |raw|
+      status, _, body = post(raw)
+      assert_equal 200, status, raw
+      assert_equal "opened", JSON.parse(body.join)["action"], raw
+    end
+    assert_equal payloads.size, outbox_files.size, "each sanitized event opens its own ticket"
+  end
+
+  def test_utf8_labeled_body_with_non_ascii_content_is_accepted
+    event = Fixture.event
+    event["extra"] = { "note" => "café über ✓" }
+    status, _, resp_body = post(event.to_json) # UTF-8-labeled, raw non-ASCII bytes
+    assert_equal 200, status
+    assert_equal "opened", JSON.parse(resp_body.join)["action"]
+    assert_includes File.read(outbox_files.first), "café über ✓"
+  end
+
+  def test_invalid_utf8_in_json_keys_is_scrubbed
+    body = (+"{\"caf\xE9\":1,\"message\":\"ok\"}").force_encoding(Encoding::UTF_8)
+    status, _, resp_body = post(body)
+    assert_equal 200, status
+    outbox = File.read(outbox_files.first)
+    assert_includes outbox, "caf\uFFFD", "invalid key bytes must be replaced, not crash or leak raw"
+  end
+
+  def test_envelope_event_without_signal_is_rejected
+    header = { "event_id" => "x", "sent_at" => "2026-09-19T12:00:00Z" }
+    wire = [JSON.generate(header), JSON.generate("type" => "event"), { "event_id" => "x" }.to_json].join("\n")
+    status, _, body = post(wire)
+    assert_equal 400, status
+    assert_equal "event has no exception or message", JSON.parse(body.join)["error"]
+  end
+
   def test_unknown_route_is_404
     status, _, body = get("/nope")
     assert_equal 404, status

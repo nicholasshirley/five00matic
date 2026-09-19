@@ -10,6 +10,9 @@ module SentryTickets
   # before_send hook has) or a raw Sentry envelope (what a DSN pointed here
   # would POST), and answers with what happened to it.
   class App
+    BAD_PAYLOAD_ERROR = "unrecognized payload (expected event JSON or Sentry envelope)"
+    NO_SIGNAL_ERROR = "event has no exception or message"
+
     def initialize(config, store: nil, github: nil)
       @store = store || Store.new(data_dir: config.data_dir, notice_interval: config.notice_interval)
       @github = github || GitHubSync.new(
@@ -48,8 +51,8 @@ module SentryTickets
     private
 
     def handle_events(env)
-      event, project = extract_event(env)
-      return json({ error: "unrecognized payload (expected event JSON or Sentry envelope)" }, status: 400) if event.nil?
+      event, project, error = extract_event(env)
+      return json({ error: error }, status: 400) if event.nil?
 
       lock_for(Store.fingerprint(event)).synchronize do
         action, rec, ev = @store.ingest(event, project)
@@ -99,43 +102,98 @@ module SentryTickets
         "- Latest seen: #{rec['last_seen']} (event `#{rec['last_event_id']}`)"
     end
 
+    # Returns [event, project, error]. A nil event carries the reason in
+    # error.
     def extract_event(env)
-      body = env["rack.input"]
-      body = body.respond_to?(:read) ? body.read : body.to_s
-      if body.start_with?("\x1F\x8B".b)
+      raw = env["rack.input"]
+      raw = raw.respond_to?(:read) ? raw.read : raw
+      # Rack servers hand over binary bodies, but embedded callers may not;
+      # normalize so encoding-sensitive calls (strip, gzip sniff, JSON.parse)
+      # behave like the deployed path whatever the input's label.
+      body = raw.to_s.b
+      # gzip magic bytes, by value: a String#start_with? sniff raises
+      # Encoding::CompatibilityError when the body is UTF-8-labeled and
+      # carries non-ASCII bytes.
+      if body.getbyte(0) == 0x1F && body.getbyte(1) == 0x8B
         begin
           body = Zlib.gunzip(body)
         rescue Zlib::Error
-          return [nil, nil]
+          return [nil, nil, BAD_PAYLOAD_ERROR]
         end
       end
-      return [nil, nil] if body.strip.empty?
+      return [nil, nil, BAD_PAYLOAD_ERROR] if body.strip.empty?
 
       event, project = envelope_event(body)
-      return [event, project] if event
+      if event.nil?
+        begin
+          parsed = JSON.parse(body)
+        rescue JSON::ParserError
+          return [nil, nil, BAD_PAYLOAD_ERROR]
+        end
+        return [nil, nil, BAD_PAYLOAD_ERROR] unless parsed.is_a?(Hash)
 
-      begin
-        parsed = JSON.parse(body)
-      rescue JSON::ParserError
-        return [nil, nil]
+        event, project = parsed, (env["HTTP_X_SENTRY_PROJECT"] || "default")
       end
-      return [nil, nil] unless parsed.is_a?(Hash)
 
-      [scrub_encoding(parsed), env["HTTP_X_SENTRY_PROJECT"] || "default"]
+      event = normalize(event)
+      return [nil, nil, NO_SIGNAL_ERROR] unless error_event?(event)
+
+      [event, project]
     end
 
     # JSON.parse trusts the source encoding: a body that is not valid UTF-8
-    # yields UTF-8-labeled strings with invalid bytes, which later crash
-    # JSON.pretty_generate in the ticket renderer. Normalize every string so
-    # one bad event cannot wedge the pipeline for its fingerprint.
+    # yields strings with invalid bytes, which later crash JSON generation in
+    # the ticket renderer — or ride along raw when the source was
+    # binary-labeled, making GitHub reject the delivery with 400. Normalize
+    # every string, keys included, so one bad event cannot wedge the pipeline
+    # for its fingerprint.
     def scrub_encoding(obj)
       case obj
-      when Hash then obj.transform_values { |v| scrub_encoding(v) }
-      when Array then obj.map { |v| scrub_encoding(v) }
+      when Hash
+        obj.each_with_object({}) { |(k, v), h| h[scrub_encoding(k)] = scrub_encoding(v) }
+      when Array
+        obj.map { |v| scrub_encoding(v) }
       when String
         obj.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD")
       else obj
       end
+    end
+
+    # Fingerprinting and rendering assume the SDK's shapes and crash on
+    # garbage (Hash#dig into a String, Integer#[]). Strip structurally
+    # invalid pieces instead of 500ing; whatever survives is real signal.
+    def normalize(event)
+      scrub_encoding(event).tap { |ev| normalize_exception(ev) }
+    end
+
+    def normalize_exception(event)
+      ex = event["exception"]
+      return event.delete("exception") unless ex.is_a?(Hash)
+
+      values = ex["values"].is_a?(Array) ? ex["values"].grep(Hash) : nil
+      return event.delete("exception") if values.nil? || values.empty?
+
+      values.each { |v| normalize_exception_value(v) }
+      ex["values"] = values
+    end
+
+    def normalize_exception_value(v)
+      st = v["stacktrace"]
+      return v.delete("stacktrace") unless st.is_a?(Hash)
+
+      return unless st["frames"].is_a?(Array)
+      st["frames"] = st["frames"].grep(Hash)
+      st["frames"].each do |f|
+        %w[pre_context post_context].each { |k| f.delete(k) unless f[k].is_a?(Array) }
+      end
+    end
+
+    # After normalize, a present "exception" is usable. Anything else needs a
+    # non-blank message: without one there is nothing to group on, and every
+    # such event would collide on the digest of the empty fingerprint.
+    def error_event?(event)
+      return true if event["exception"].is_a?(Hash)
+      !event["message"].to_s.strip.empty?
     end
 
     # Envelope wire format: headers JSON line, then (item headers JSON line,
@@ -159,7 +217,7 @@ module SentryTickets
         item_header = JSON.parse(lines[i])
         if item_header.is_a?(Hash) && %w(event error).include?(item_header["type"])
           payload = JSON.parse(lines[i + 1])
-          return [scrub_encoding(payload), project || "default"] if payload.is_a?(Hash)
+          return [payload, project || "default"] if payload.is_a?(Hash)
         end
         i += 2
       end
