@@ -10,6 +10,12 @@ module SentryTickets
     # GitHub rejects issue bodies over 65,536 characters; stay under it so a
     # single fat event cannot permanently fail delivery.
     MAX_BODY_CHARS = 60_000
+    # Kept free of the structured sections so the raw payload always has
+    # room for its wrapper and a useful slice.
+    PAYLOAD_RESERVE = 2_000
+    PAYLOAD_OPEN = "<details>\n<summary>Full event payload</summary>\n\n```json\n"
+    PAYLOAD_CLOSE = "\n```\n\n</details>"
+    PAYLOAD_CLIPPED = "\n*(payload truncated to fit GitHub issue size limits)*"
 
     def initialize(event, group)
       @event = event
@@ -17,10 +23,7 @@ module SentryTickets
     end
 
     def body
-      core = sections.compact.join("\n\n")
-      # A monstrous tags/extra section can overflow on its own; clip it so the
-      # raw payload always keeps a slice of the budget.
-      core = clip_core(core, MAX_BODY_CHARS - 2_000)
+      core = clip_core(sections.compact.join("\n\n"), MAX_BODY_CHARS - PAYLOAD_RESERVE)
       "#{core}\n\n#{raw_payload_section(MAX_BODY_CHARS - core.length - 2)}"
     end
 
@@ -65,8 +68,7 @@ module SentryTickets
       end
       lines << "- **Body:** #{format_value(req['data'])}" if req["data"]
       lines << "- **Cookies:** #{format_value(req['cookies'])}" if req["cookies"]
-      remote_addr = req["env"].is_a?(Hash) ? req["env"]["REMOTE_ADDR"] : nil
-      lines << "- **User IP:** #{remote_addr}" if remote_addr
+      lines << "- **User IP:** #{@event.remote_addr}" if @event.remote_addr
       lines.join("\n")
     end
 
@@ -127,29 +129,22 @@ module SentryTickets
     end
 
     # The raw payload is the least important section, so it is the one that
-    # shrinks: pretty JSON first, compact JSON second, then clipped. The
+    # shrinks: pretty JSON, else compact JSON, else compact JSON clipped. The
     # details block and its fence always close, so the markdown stays valid.
     def raw_payload_section(budget)
-      header = "<details>\n<summary>Full event payload</summary>\n\n```json\n"
-      footer = "\n```\n\n</details>"
-      note = "\n*(payload truncated to fit GitHub issue size limits)*"
-
-      json = JSON.pretty_generate(@event.to_h)
-      return "#{header}#{json}#{footer}" if header.length + json.length + footer.length <= budget
+      pretty = "#{PAYLOAD_OPEN}#{JSON.pretty_generate(@event.to_h)}#{PAYLOAD_CLOSE}"
+      return pretty if pretty.length <= budget
 
       json = JSON.generate(@event.to_h)
-      room = budget - header.length - footer.length - note.length
-      return "#{header}#{json}#{footer}" if room.positive? && header.length + json.length + footer.length <= budget
+      compact = "#{PAYLOAD_OPEN}#{json}#{PAYLOAD_CLOSE}"
+      return compact if compact.length <= budget
 
-      if room.positive?
-        "#{header}#{json[0, room]}#{note}#{footer}"
-      else
-        "*(full event payload omitted: ticket exceeded GitHub issue size limits)*"
-      end
+      room = budget - PAYLOAD_OPEN.length - PAYLOAD_CLOSE.length - PAYLOAD_CLIPPED.length
+      "#{PAYLOAD_OPEN}#{json[0, room]}#{PAYLOAD_CLIPPED}#{PAYLOAD_CLOSE}"
     end
 
-    # Last resort for events whose structured sections alone overflow: cut at a
-    # line boundary and close any code fence left open.
+    # For events whose structured sections alone overflow (a monstrous tags or
+    # extra): cut at a line boundary and close any code fence left open.
     def clip_core(text, limit)
       return text if text.length <= limit
 
@@ -168,8 +163,8 @@ module SentryTickets
       s.length > 500 ? "#{s[0, 500]}..." : s
     end
 
-    # SDKs emit epoch floats, but hand-built or foreign events may carry
-    # pre-formatted strings.
+    # sentry-ruby sends epoch seconds, or a string when the app built the
+    # breadcrumb with a Time.
     def format_ts(t)
       case t
       when Numeric then Time.at(t).utc.strftime("%Y-%m-%d %H:%M:%S")

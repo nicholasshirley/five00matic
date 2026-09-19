@@ -30,6 +30,13 @@ module SentryTickets
 
     def breadcrumbs = Array(hash_at("breadcrumbs")["values"]).grep(Hash)
 
+    # The client's address, which the SDK leaves in the request's Rack env
+    # only when send_default_pii is on.
+    def remote_addr
+      env = request["env"]
+      env["REMOTE_ADDR"] if env.is_a?(Hash)
+    end
+
     # Ordered as the SDK sends them: root cause first, raised exception last.
     def exceptions
       Array(hash_at("exception")["values"]).grep(Hash).map { |v| ExceptionValue.new(v) }
