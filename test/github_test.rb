@@ -14,9 +14,13 @@ class GitHubTest < Minitest::Test
     thread = Thread.new do
       sock = server.accept
       sock.gets
-      headers = {}
-      headers[$1.downcase] = $2.strip while (line = sock.gets) != "\r\n" && line =~ /\A([^:]+): (.*)\z/
-      sock.read(headers["content-length"].to_i) if headers["content-length"]
+      length = 0
+      while (line = sock.gets) != "\r\n"
+        name, value = line.split(":", 2)
+        length = value.to_i if name.casecmp?("content-length")
+      end
+      # Read the whole request: closing with it unread resets the connection.
+      sock.read(length)
       sock.write "HTTP/1.1 #{status_line}\r\nContent-Type: application/json\r\n" \
                  "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n"
       sock.write body
@@ -55,6 +59,7 @@ class GitHubTest < Minitest::Test
       error = assert_raises(SentryTickets::DeliveryError) do
         github(api_base).open_issue(title: "t", body: "b")
       end
+      assert_match(/JSON::ParserError/, error.message)
       assert error.message.valid_encoding?, "wrapped error must be valid UTF-8, got #{error.message.inspect}"
     end
   end
