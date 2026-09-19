@@ -2,6 +2,37 @@
 
 require_relative "test_helper"
 
+class FailingGitHub
+  def open_issue(title:, body:)
+    raise SentryTickets::DeliveryError, "GitHub API 502: boom"
+  end
+
+  def comment(number:, body:)
+    raise SentryTickets::DeliveryError, "GitHub API 502: boom"
+  end
+end
+
+class SlowGitHub
+  attr_reader :opens, :comments
+
+  def initialize
+    @mutex = Mutex.new
+    @opens = 0
+    @comments = 0
+  end
+
+  def open_issue(title:, body:)
+    sleep 0.2 # widen the ingest-before-deliver race window
+    @mutex.synchronize { @opens += 1 }
+    { "number" => @opens, "url" => "http://gh/#{@opens}" }
+  end
+
+  def comment(number:, body:)
+    @mutex.synchronize { @comments += 1 }
+    { "number" => number }
+  end
+end
+
 class AppTest < Minitest::Test
   def setup
     dir = Fixture.store_dir
@@ -12,7 +43,7 @@ class AppTest < Minitest::Test
     @outbox = File.join(dir, "outbox")
   end
 
-  def post(body, headers = {})
+  def post(body, headers = {}, app: @app)
     env = {
       "REQUEST_METHOD" => "POST",
       "PATH_INFO" => "/events",
@@ -20,7 +51,7 @@ class AppTest < Minitest::Test
       "CONTENT_LENGTH" => body.bytesize.to_s,
       "rack.input" => StringIO.new(body)
     }.merge(headers)
-    @app.call(env)
+    app.call(env)
   end
 
   def get(path)
@@ -107,6 +138,97 @@ class AppTest < Minitest::Test
     assert_includes JSON.parse(body.join)["error"], "unrecognized"
   end
 
+  def test_unknown_route_is_404
+    status, _, body = get("/nope")
+    assert_equal 404, status
+    assert_equal "not found", JSON.parse(body.join)["error"]
+  end
+
+  def test_gzip_event_hash_is_accepted
+    gz = Zlib.gzip(Fixture.event.to_json)
+    status, _, body = post(gz)
+    assert_equal 200, status
+    assert_equal "opened", JSON.parse(body.join)["action"]
+  end
+
+  def test_gzip_envelope_is_accepted
+    event = Fixture.event
+    header = { "event_id" => event["event_id"], "dsn" => "https://k@my-host.local/7",
+               "sent_at" => "2026-09-19T12:00:00Z" }
+    item_header = { "type" => "event", "content_type" => "application/json" }
+    wire = [JSON.generate(header), JSON.generate(item_header), event.to_json].join("\n")
+
+    status, _, body = post(Zlib.gzip(wire))
+    resp = JSON.parse(body.join)
+    assert_equal 200, status
+    assert_equal "opened", resp["action"]
+    assert_equal "7", resp["project"]
+  end
+
+  def test_invalid_gzip_is_rejected_not_500
+    status, _, body = post("\x1F\x8B".b + "not really gzip")
+    assert_equal 400, status
+    assert_includes JSON.parse(body.join)["error"], "unrecognized"
+  end
+
+  def test_non_utf8_bytes_do_not_break_the_pipeline
+    raw = Fixture.event.to_json.sub('"pro"', '"pro\u00e9"') # valid escape, still exercises render
+    status, _, body = post(raw)
+    assert_equal 200, status
+    assert_equal "opened", JSON.parse(body.join)["action"]
+  end
+
+  def test_binary_payload_bytes_are_scrubbed
+    # A body with raw high bytes in a string parses (JSON.parse labels it
+    # UTF-8 without validating) and used to crash JSON.pretty_generate.
+    body = "{\"event_id\":\"e1\",\"message\":\"caf\xE9\",\"extra\":{\"blob\":\"\xFE\"}}".b
+    status, _, resp_body = post(body)
+    assert_equal 200, status
+    resp = JSON.parse(resp_body.join)
+    assert_equal "opened", resp["action"]
+    outbox = File.read(outbox_files.first)
+    assert_includes outbox, "caf\uFFFD" # replacement char, not a crash
+  end
+
+  def test_delivery_failure_is_recorded_and_retried
+    app = SentryTickets::App.new(@config, github: FailingGitHub.new)
+    status, _, body = post(Fixture.event.to_json, {}, app: app)
+    resp = JSON.parse(body.join)
+    assert_equal 200, status, "sender has handed off ownership; failure is recorded, not propagated"
+    assert_equal "opened", resp["action"]
+    assert_match(/502/, resp["issue_error"])
+
+    status, _, body = post(Fixture.event.to_json, {}, app: app)
+    resp = JSON.parse(body.join)
+    assert_equal 200, status
+    assert_equal "opened", resp["action"], "failed opens retry on the next occurrence"
+    assert_equal 2, resp["count"]
+  end
+
+  def test_concurrent_same_fingerprint_opens_one_issue
+    dir = Fixture.store_dir
+    config = SentryTickets::Config.new(repo: "x/y", token: "t", data_dir: dir, notice_interval: 3600)
+    github = SlowGitHub.new
+    app = SentryTickets::App.new(config, github: github)
+
+    threads = 5.times.map do
+      Thread.new { post(Fixture.event.to_json, {}, app: app) }
+    end
+    threads.each(&:join)
+
+    assert_equal 5, app.store.all.first["count"]
+    assert_equal 1, github.opens, "concurrent first occurrences must open exactly one issue"
+    assert_equal 0, github.comments
+  end
+
+  def test_health_with_no_events
+    status, _, body = get("/health")
+    assert_equal 200, status
+    health = JSON.parse(body.join)
+    assert_equal 0, health["tracked"]
+    assert_equal SentryTickets::VERSION, health["version"]
+  end
+
   def test_health_and_issues
     post(Fixture.event.to_json)
     status, _, body = get("/health")
@@ -124,7 +246,7 @@ class AppTest < Minitest::Test
   end
 
   def test_project_header_on_raw_hash
-    _, _, body = post(Fixture.event.to_json, "HTTP_X_SENTRY_PROJECT" => "42")
+    _, _, body = post(Fixture.event.to_json, { "HTTP_X_SENTRY_PROJECT" => "42" })
     resp = JSON.parse(body.join)
     assert_equal "42", resp["project"]
   end

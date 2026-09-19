@@ -10,15 +10,21 @@ module SentryTickets
   # before_send hook has) or a raw Sentry envelope (what a DSN pointed here
   # would POST), and answers with what happened to it.
   class App
-    def initialize(config)
-      @store = Store.new(data_dir: config.data_dir, notice_interval: config.notice_interval)
-      @github = GitHubSync.new(
+    def initialize(config, store: nil, github: nil)
+      @store = store || Store.new(data_dir: config.data_dir, notice_interval: config.notice_interval)
+      @github = github || GitHubSync.new(
         repo: config.repo,
         token: config.token,
         labels: config.labels,
         api_base: config.api_base,
         outbox_dir: File.join(config.data_dir, "outbox")
       )
+      # Serializes ingest -> deliver per fingerprint. The standalone server
+      # (bin/serve.rb) handles each connection on its own thread, and without
+      # this two concurrent first occurrences of one error would both see
+      # :opened and create duplicate GitHub issues.
+      @locks = {}
+      @locks_mutex = Mutex.new
     end
 
     attr_reader :store, :github
@@ -45,18 +51,24 @@ module SentryTickets
       event, project = extract_event(env)
       return json({ error: "unrecognized payload (expected event JSON or Sentry envelope)" }, status: 400) if event.nil?
 
-      action, rec, ev = @store.ingest(event, project)
-      deliver(action, rec, ev)
-      json({
-        action: action.to_s,
-        count: rec["count"],
-        fingerprint: rec["fingerprint"],
-        project: rec["project"],
-        first_seen: rec["first_seen"],
-        last_seen: rec["last_seen"],
-        issue: rec["issue_url"] || rec["outbox"],
-        issue_error: rec["last_error"]
-      })
+      lock_for(Store.fingerprint(event)).synchronize do
+        action, rec, ev = @store.ingest(event, project)
+        deliver(action, rec, ev)
+        json({
+          action: action.to_s,
+          count: rec["count"],
+          fingerprint: rec["fingerprint"],
+          project: rec["project"],
+          first_seen: rec["first_seen"],
+          last_seen: rec["last_seen"],
+          issue: rec["issue_url"] || rec["outbox"],
+          issue_error: rec["last_error"]
+        })
+      end
+    end
+
+    def lock_for(fp)
+      @locks_mutex.synchronize { @locks[fp] ||= Mutex.new }
     end
 
     # Delivery runs inline (a real deployment would queue it). Failure is
@@ -90,7 +102,13 @@ module SentryTickets
     def extract_event(env)
       body = env["rack.input"]
       body = body.respond_to?(:read) ? body.read : body.to_s
-      body = Zlib::gunzip(body) if body.start_with?("\x1F\x8B".b)
+      if body.start_with?("\x1F\x8B".b)
+        begin
+          body = Zlib.gunzip(body)
+        rescue Zlib::Error
+          return [nil, nil]
+        end
+      end
       return [nil, nil] if body.strip.empty?
 
       event, project = envelope_event(body)
@@ -103,7 +121,21 @@ module SentryTickets
       end
       return [nil, nil] unless parsed.is_a?(Hash)
 
-      [parsed, env["HTTP_X_SENTRY_PROJECT"] || "default"]
+      [scrub_encoding(parsed), env["HTTP_X_SENTRY_PROJECT"] || "default"]
+    end
+
+    # JSON.parse trusts the source encoding: a body that is not valid UTF-8
+    # yields UTF-8-labeled strings with invalid bytes, which later crash
+    # JSON.pretty_generate in the ticket renderer. Normalize every string so
+    # one bad event cannot wedge the pipeline for its fingerprint.
+    def scrub_encoding(obj)
+      case obj
+      when Hash then obj.transform_values { |v| scrub_encoding(v) }
+      when Array then obj.map { |v| scrub_encoding(v) }
+      when String
+        obj.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD")
+      else obj
+      end
     end
 
     # Envelope wire format: headers JSON line, then (item headers JSON line,
@@ -115,15 +147,19 @@ module SentryTickets
       return [nil, nil] unless header.is_a?(Hash) && header["event_id"] && (header["dsn"] || header["sent_at"])
 
       project =
-        if header["dsn"]
-          URI.parse(header["dsn"]).path.split("/").last
+        if header["dsn"].is_a?(String)
+          begin
+            URI.parse(header["dsn"]).path.split("/").last
+          rescue URI::Error
+            nil
+          end
         end
       i = 1
       while i + 1 < lines.length
         item_header = JSON.parse(lines[i])
         if item_header.is_a?(Hash) && %w(event error).include?(item_header["type"])
           payload = JSON.parse(lines[i + 1])
-          return [payload, project || "default"] if payload.is_a?(Hash)
+          return [scrub_encoding(payload), project || "default"] if payload.is_a?(Hash)
         end
         i += 2
       end
