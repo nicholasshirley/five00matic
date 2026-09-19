@@ -63,10 +63,15 @@ module SentryTickets
         q = req["query_string"] ? " (query: #{val(req['query_string'])})" : ""
         lines << "- **URL:** #{val(url)}#{q}"
       end
-      lines << "- **Status:** #{val(@event.dig('contexts', 'http', 'status_code'))}" if @event.dig("contexts", "http")
+      status = @event["contexts"].is_a?(Hash) &&
+               @event["contexts"]["http"].is_a?(Hash) &&
+               @event["contexts"]["http"]["status_code"]
+      lines << "- **Status:** #{val(status)}" if status
       lines << "- **Body:** #{format_value(req['data'])}" if req["data"]
       lines << "- **Cookies:** #{format_value(req['cookies'])}" if req["cookies"]
-      lines << "- **User IP:** #{val(req.dig('env', 'REMOTE_ADDR'))}" if req.dig("env", "REMOTE_ADDR")
+      env = req["env"]
+      remote_addr = env.is_a?(Hash) ? env["REMOTE_ADDR"] : nil
+      lines << "- **User IP:** #{val(remote_addr)}" if remote_addr
       lines.join("\n")
     end
 
@@ -144,7 +149,8 @@ module SentryTickets
     end
 
     def breadcrumb_section
-      crumbs = @event.dig("breadcrumbs", "values") || []
+      bc = @event["breadcrumbs"]
+      crumbs = bc.is_a?(Hash) && bc["values"].is_a?(Array) ? bc["values"].grep(Hash) : []
       return nil if crumbs.empty?
 
       lines = ["## Breadcrumbs (last #{[MAX_BREADCRUMBS, crumbs.length].min})", ""]

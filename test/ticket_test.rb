@@ -97,6 +97,43 @@ class TicketTest < Minitest::Test
     assert_includes body, "**Cookies:** session=abc"
   end
 
+  def test_breadcrumbs_rendered_with_last_ten_cap
+    crumbs = 15.times.map { |i| Fixture.breadcrumb("http", "GET /api/orders?page=#{i}", timestamp: 1_758_268_800 + i) }
+    event = Fixture.event(breadcrumbs: crumbs)
+    body = SentryTickets::Ticket.new(event, @rec).body
+    assert_includes body, "## Breadcrumbs (last 10)"
+    assert_includes body, "[INFO] 2025-09-19 08:00:14 http — GET /api/orders?page=14"
+    refute_includes body, "page=4\n", "only the last 10 crumbs are shown"
+    assert_includes body, "page=5\n"
+  end
+
+  def test_breadcrumb_data_rendered_and_string_timestamps_pass_through
+    crumbs = [Fixture.breadcrumb("redis", "hmset user:42", level: "warning",
+                                 timestamp: "2026-09-19T12:00:00Z", data: { "key" => "user:42" })]
+    event = Fixture.event(breadcrumbs: crumbs)
+    body = SentryTickets::Ticket.new(event, @rec).body
+    assert_includes body, "[WARNING] 2026-09-19T12:00:00Z redis — hmset user:42"
+    assert_includes body, '`{"key":"user:42"}`'
+  end
+
+  def test_malformed_ancillary_sections_render_without_crashing
+    garbage = Fixture.event.merge(
+      "breadcrumbs" => { "values" => "garbage" },
+      "contexts" => "garbage",
+      "request" => { "url" => "https://x", "env" => "garbage" }
+    )
+    body = SentryTickets::Ticket.new(garbage, @rec).body
+    assert_includes body, "## Summary"
+    assert_includes body, "## Request"
+    assert_includes body, "**URL:** https://x"
+    refute_includes body, "## Breadcrumbs"
+    refute_includes body, "## Contexts"
+
+    crumbs_garbage = Fixture.event(breadcrumbs: [7, "oops"])
+    body = SentryTickets::Ticket.new(crumbs_garbage, @rec).body
+    refute_includes body, "## Breadcrumbs", "non-hash crumbs are dropped, not rendered"
+  end
+
   def test_raw_payload_embedded
     body = @ticket.body
     assert_includes body, "<details>"

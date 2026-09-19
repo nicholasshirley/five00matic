@@ -30,7 +30,8 @@ module Fixture
     type: "NoMethodError",
     value: "undefined method `name' for nil:NilClass",
     frame_lineno: 26,
-    fingerprint: []
+    fingerprint: [],
+    breadcrumbs: nil
   )
     {
       "event_id" => id,
@@ -58,7 +59,16 @@ module Fixture
                                            frame(frame_lineno, context: ["  def load", "    @customer"])] } }
         ]
       }
-    }
+    }.tap do |event|
+      # SDK shape: breadcrumbs.values with epoch-float timestamps.
+      event["breadcrumbs"] = { "values" => breadcrumbs } if breadcrumbs
+    end
+  end
+
+  def self.breadcrumb(category, message, timestamp: 1_758_268_800.123, level: "info", data: nil)
+    c = { "timestamp" => timestamp, "category" => category, "message" => message, "level" => level }
+    c["data"] = data if data
+    c
   end
 
   def self.store_dir
