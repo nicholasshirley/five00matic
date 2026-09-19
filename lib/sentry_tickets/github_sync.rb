@@ -4,6 +4,7 @@ require "json"
 require "net/http"
 require "uri"
 require "fileutils"
+require "digest/sha2"
 
 module SentryTickets
   class DeliveryError < StandardError; end
@@ -15,6 +16,9 @@ module SentryTickets
   # (including formatting) is runnable without a real GitHub.
   class GitHubSync
     GITHUB_API_VERSION = "2022-11-28"
+    OPEN_TIMEOUT = 10
+    READ_TIMEOUT = 30
+    WRITE_TIMEOUT = 30
 
     def initialize(repo:, token: nil, labels: ["error-report"],
                    api_base: "https://api.github.com", outbox_dir: nil)
@@ -66,6 +70,9 @@ module SentryTickets
       uri = URI.parse("#{@api_base}#{path}")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = uri.scheme == "https"
+      http.open_timeout = OPEN_TIMEOUT
+      http.read_timeout = READ_TIMEOUT
+      http.write_timeout = WRITE_TIMEOUT if http.respond_to?(:write_timeout=)
       req = method == :post ? Net::HTTP::Post.new(uri.request_uri) : Net::HTTP::Get.new(uri.request_uri)
       req["Content-Type"] = "application/json"
       req["Accept"] = "application/vnd.github+json"
@@ -88,7 +95,11 @@ module SentryTickets
     def outbox_write(kind, title, text)
       FileUtils.mkdir_p(@outbox_dir)
       stamp = Time.now.utc.strftime("%Y%m%d-%H%M%S")
-      file = File.join(@outbox_dir, "#{kind}-#{self.class.slugify(title)}.#{stamp}.md")
+      # Distinct errors often slug to the same 60-character prefix (any
+      # NoMethodError on nil does); disambiguate with a content digest so
+      # same-second writes do not overwrite each other.
+      digest = Digest::SHA256.hexdigest(text)[0, 8]
+      file = File.join(@outbox_dir, "#{kind}-#{self.class.slugify(title)}.#{digest}.#{stamp}.md")
       File.write(file, "# #{title}\n\n#{text}\n")
       file
     end

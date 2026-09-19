@@ -176,8 +176,14 @@ module SentryTickets
 
     def val(v) = v.nil? ? "?" : v.to_s
 
+    # SDKs emit epoch floats, but hand-built or foreign events may carry
+    # pre-formatted strings.
     def format_ts(t)
-      t ? Time.at(t).utc.strftime("%Y-%m-%d %H:%M:%S") : "?"
+      case t
+      when Numeric then Time.at(t).utc.strftime("%Y-%m-%d %H:%M:%S")
+      when String then t
+      else "?"
+      end
     end
   end
 end
