@@ -117,14 +117,9 @@ module SentryTickets
 
       private
 
-      # SDK payloads carry context as raw source lines (plain strings,
-      # newline-terminated); hand-built events may use [lineno, text] pairs.
-      def context(key)
-        lines = @data[key]
-        return [] unless lines.is_a?(Array)
-
-        lines.map { |ln| (ln.is_a?(Array) ? ln[1] : ln).to_s.chomp }
-      end
+      # Raw source lines, newline-terminated; the SDK pads with nil where the
+      # context runs past the start or end of the file.
+      def context(key) = Array(@data[key]).grep(String).map(&:chomp)
     end
 
     private

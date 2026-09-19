@@ -63,8 +63,6 @@ module SentryTickets
         query = req["query_string"] ? " (query: #{req['query_string']})" : ""
         lines << "- **URL:** #{req['url']}#{query}"
       end
-      status = @event.contexts["http"].is_a?(Hash) && @event.contexts["http"]["status_code"]
-      lines << "- **Status:** #{status}" if status
       lines << "- **Body:** #{format_value(req['data'])}" if req["data"]
       lines << "- **Cookies:** #{format_value(req['cookies'])}" if req["cookies"]
       remote_addr = req["env"].is_a?(Hash) ? req["env"]["REMOTE_ADDR"] : nil

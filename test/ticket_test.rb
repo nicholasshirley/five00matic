@@ -62,27 +62,21 @@ class TicketTest < Minitest::Test
     assert_includes body, "-- Order.load"
   end
 
-  def test_breadcrumb_with_out_of_range_numeric_timestamp_renders_unknown
-    # Time.at holds any Bignum, but not a non-finite Float; a foreign event
-    # carrying one (or rendered from a hand-built hash) must not abort the
-    # rest of the ticket.
+  def test_stacktrace_skips_context_padding_past_the_file_edges
+    # A crash on line 2 with three lines of context: the SDK pads with nil.
+    event = Fixture.payload
+    frame = event.dig("exception", "values").last["stacktrace"]["frames"].last
+    frame["pre_context"] = [nil, nil, "class Order\n"]
+    body = ticket(event, @rec).body
+    assert_includes body, "-- Order.load at /app/lib/orders.rb:26\n    class Order\n>   "
+  end
+
+  def test_breadcrumb_without_numeric_timestamp_renders_string_or_unknown
     crumbs = [Fixture.breadcrumb("http", "GET /x", timestamp: nil),
               Fixture.breadcrumb("redis", "get k", timestamp: "not-a-ts-but-a-string")]
     body = ticket(Fixture.payload(breadcrumbs: crumbs), @rec).body
     assert_includes body, "[INFO] ? http"
     assert_includes body, "not-a-ts-but-a-string redis"
-  end
-
-  def test_stacktrace_context_accepts_lineno_text_pairs
-    event = Fixture.payload
-    frames = event.dig("exception", "values").last["stacktrace"]["frames"]
-    frames.last["pre_context"] = [[25, "  def load"]]
-    frames.last["context_line"] = "    boom"
-    frames.last["post_context"] = [[27, "  end"]]
-    body = ticket(event, @rec).body
-    assert_includes body, "      def load"
-    assert_includes body, ">       boom"
-    assert_includes body, "      end"
   end
 
   def test_stacktrace_falls_back_to_abs_path
