@@ -21,7 +21,7 @@ lib/sentry_tickets/ticket.rb   GitHub-issue markdown rendering
 lib/sentry_tickets/github_sync.rb  thin REST client + dry-run outbox
 lib/sentry_tickets/app.rb      the RACK app (POST /events, GET /health, /issues)
 bin/serve.rb                   zero-dependency standalone server (stdlib TCPServer)
-config.ru                      RACK entry (puma/rackup) for a real deployment
+config.ru                      RACK entry (puma/rackup) for a real deployment, mounted at /sentry
 scripts/make_sample_event.rb   generates a real event using the installed SDK
 test/                          minitest suite
 sample/                        generated sample payloads (gitignored)

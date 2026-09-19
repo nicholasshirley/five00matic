@@ -6,5 +6,5 @@ $LOAD_PATH.unshift(File.expand_path("lib", __dir__))
 require "sentry_tickets"
 
 map "/sentry" do
-  SentryTickets::App.new(SentryTickets::Config.new)
+  run SentryTickets::App.new(SentryTickets::Config.new)
 end
