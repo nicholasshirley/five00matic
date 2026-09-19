@@ -32,8 +32,11 @@ class GitHubTest < Minitest::Test
     server.close
   end
 
-  def test_owns_only_issues_github_numbered
-    assert github("http://unused").owns?({ "number" => 7, "url" => "https://github.com/you/repo/issues/7" })
+  def test_owns_only_issues_opened_in_its_repo
+    assert github("http://unused").owns?({ "repo" => "you/repo", "number" => 7 })
+    assert github("http://unused").owns?({ "repo" => "You/Repo", "number" => 7 }), "repo names are case-insensitive"
+    refute github("http://unused").owns?({ "repo" => "you/old-repo", "number" => 7 }),
+           "#7 of the old repo is not #7 of this one"
     refute github("http://unused").owns?({ "url" => "/data/outbox/issue-boom.md" }), "an outbox issue is not GitHub's"
     refute github("http://unused").owns?(nil)
   end

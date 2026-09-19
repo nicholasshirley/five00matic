@@ -22,15 +22,17 @@ module SentryTickets
 
     def dry_run? = false
 
-    # Only issues GitHub numbered, not ones filed to the outbox.
-    def owns?(issue) = !issue.nil? && !issue["number"].nil?
+    # Only issues opened in this repo: an outbox file has no repo, and after
+    # TICKET_REPO changes, issue #7 of the old repo is not #7 of the new one.
+    # GitHub matches repo names case-insensitively.
+    def owns?(issue) = !issue.nil? && @repo.casecmp?(issue["repo"].to_s)
 
-    # Returns { "number" => Integer, "url" => String }
+    # Returns { "repo" => String, "number" => Integer, "url" => String }
     def open_issue(title:, body:)
       issue = post("/repos/#{@repo}/issues", title: title, body: body, labels: @labels)
       raise DeliveryError, "GitHub response has no issue number" if issue["number"].nil?
 
-      { "number" => issue["number"], "url" => issue["html_url"] }
+      { "repo" => @repo, "number" => issue["number"], "url" => issue["html_url"] }
     end
 
     def comment(issue, body:)

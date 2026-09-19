@@ -46,7 +46,8 @@ TICKET_NOTICE_INTERVAL=2 ruby bin/serve.rb      # port 9292, 127.0.0.1
 TICKET_REPO=you/your-repo TICKET_TOKEN=ghp_xxx ruby bin/serve.rb
 
 # an error filed only to the outbox has no GitHub issue yet; its next
-# occurrence after the switch opens one.
+# occurrence after the switch opens one. Changing TICKET_REPO works the same
+# way: issues stay with the repo they were opened in.
 ```
 
 Generate the demo payloads (runs under the RVM 3.2.0 where the 5.10 SDK lives):
