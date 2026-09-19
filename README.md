@@ -19,6 +19,7 @@ lib/sentry_tickets/event.rb    the SDK payload: fingerprint, title, sections
 lib/sentry_tickets/group.rb    one fingerprint: counts, its issue, notice anchors
 lib/sentry_tickets/store.rb    the groups, persisted (JSON file)
 lib/sentry_tickets/ticket.rb   GitHub-issue markdown rendering
+lib/sentry_tickets/notice.rb   recurrence-notice comment rendering
 lib/sentry_tickets/github.rb   thin GitHub REST client
 lib/sentry_tickets/outbox.rb   dry-run stand-in: tickets as markdown files
 lib/sentry_tickets/tracker.rb  record an occurrence, deliver what GitHub is owed

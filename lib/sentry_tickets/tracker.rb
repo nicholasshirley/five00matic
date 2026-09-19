@@ -48,7 +48,7 @@ module SentryTickets
     end
 
     def post_notice(group, event, now)
-      @destination.comment(group.issue, body: notice_text(group))
+      @destination.comment(group.issue, body: Notice.new(group).body)
       [:commented, update(group) { |g| g.delivered(g.issue, at: now) }]
     rescue IssueGone
       open_issue(update(group, &:without_issue), event, now)
@@ -57,13 +57,5 @@ module SentryTickets
     end
 
     def update(group, &) = @store.update(group.fingerprint, &)
-
-    def notice_text(group)
-      "Recurrence notice.\n\n" \
-        "- New occurrences since last notice: #{group.unnotified_count}\n" \
-        "- Total occurrences: #{group.count}\n" \
-        "- First seen: #{group.first_seen}\n" \
-        "- Latest seen: #{group.last_seen} (event `#{group.last_event_id}`)"
-    end
   end
 end
