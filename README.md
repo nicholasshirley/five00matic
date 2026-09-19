@@ -45,9 +45,8 @@ TICKET_NOTICE_INTERVAL=2 ruby bin/serve.rb      # port 9292, 127.0.0.1
 # real delivery: set repo + token and restart
 TICKET_REPO=you/your-repo TICKET_TOKEN=ghp_xxx ruby bin/serve.rb
 
-# fingerprints that only ever existed in dry-run mode have no GitHub issue
-# number yet; their first due recurrence after the switch opens an issue
-# instead of commenting.
+# an error filed only to the outbox has no GitHub issue yet; its next
+# occurrence after the switch opens one.
 ```
 
 Generate the demo payloads (runs under the RVM 3.2.0 where the 5.10 SDK lives):
@@ -121,8 +120,8 @@ Notes:
   next occurrence (the count was already persisted, so no event is lost); the
   HTTP response still reports 200 because the sender has handed off ownership.
   If GitHub answers 404 for a recurrence comment (the tracked issue was
-  deleted, or the repo was re-created), a replacement issue is opened instead
-  of erroring on every recurrence forever.
+  deleted, or the repo was re-created), the dead issue is dropped and a
+  replacement opened; should that fail too, the next occurrence opens one.
 - **Ticket size**: GitHub rejects issue bodies over 65,536 characters, so
   rendered tickets are capped below that. The raw-payload section switches to
   compact JSON and is clipped first; only an event whose structured sections

@@ -37,6 +37,8 @@ module SentryTickets
 
     def failed(message) = with(last_error: message)
 
+    def without_issue = with(issue: nil)
+
     def notice_due?(now, interval)
       last_notice_at.nil? || now - Time.iso8601(last_notice_at) >= interval
     end

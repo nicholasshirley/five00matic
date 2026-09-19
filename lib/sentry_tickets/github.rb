@@ -22,6 +22,9 @@ module SentryTickets
 
     def dry_run? = false
 
+    # Only issues GitHub numbered, not ones filed to the outbox.
+    def owns?(issue) = !issue.nil? && !issue["number"].nil?
+
     # Returns { "number" => Integer, "url" => String }
     def open_issue(title:, body:)
       issue = post("/repos/#{@repo}/issues", title: title, body: body, labels: @labels)
@@ -30,8 +33,10 @@ module SentryTickets
       { "number" => issue["number"], "url" => issue["html_url"] }
     end
 
-    def comment(number:, body:)
-      post("/repos/#{@repo}/issues/#{number}/comments", body: body)
+    def comment(issue, body:)
+      post("/repos/#{@repo}/issues/#{issue['number']}/comments", body: body)
+    rescue DeliveryError => e
+      raise e.status == 404 ? IssueGone.new(e.message, status: 404) : e
     end
 
     private

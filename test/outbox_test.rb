@@ -16,13 +16,19 @@ class OutboxTest < Minitest::Test
   end
 
   def test_comment_subject_reflects_issue_number
-    @outbox.comment(number: 7, body: "text")
+    @outbox.comment({ "number" => 7 }, body: "text")
     assert_includes File.read(Dir[File.join(@dir, "comment-*.md")].first), "notice for #7"
 
-    @outbox.comment(number: nil, body: "text")
+    @outbox.comment({ "url" => "/data/outbox/issue-boom.md" }, body: "text")
     files = Dir[File.join(@dir, "comment-*.md")]
     assert_equal 2, files.size
     assert_includes File.read(files.last), "recurrence notice"
+  end
+
+  def test_owns_whatever_issue_the_group_was_filed_as
+    assert @outbox.owns?({ "url" => "/data/outbox/issue-boom.md" })
+    assert @outbox.owns?({ "number" => 7 })
+    refute @outbox.owns?(nil)
   end
 
   def test_same_slug_distinct_bodies_do_not_overwrite

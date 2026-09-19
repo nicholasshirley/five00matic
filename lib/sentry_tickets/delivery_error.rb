@@ -15,4 +15,8 @@ module SentryTickets
       super(message&.dup&.force_encoding(Encoding::UTF_8)&.scrub)
     end
   end
+
+  # The issue a notice was meant for no longer exists at the destination:
+  # deleted on GitHub, or its repo re-created.
+  class IssueGone < DeliveryError; end
 end

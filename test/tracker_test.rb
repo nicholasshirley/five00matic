@@ -2,62 +2,9 @@
 
 require_relative "test_helper"
 
-class FailingGitHub
-  def open_issue(title:, body:)
-    raise SentryTickets::DeliveryError, "GitHub API 502: boom"
-  end
-
-  def comment(number:, body:)
-    raise SentryTickets::DeliveryError, "GitHub API 502: boom"
-  end
-end
-
-# Delivers errors with raw binary bytes in the message, the way a wrapped
-# JSON::ParserError on a middlebox's garbage response body would.
-class BinaryErrorGitHub
-  def open_issue(title:, body:)
-    raise SentryTickets::DeliveryError, "boom: \xFF\xFE".b
-  end
-
-  def comment(number:, body:)
-    raise SentryTickets::DeliveryError, "boom: \xFF\xFE".b
-  end
-end
-
-class SlowGitHub
-  attr_reader :opens, :comments
-
-  def initialize
-    @mutex = Mutex.new
-    @opens = 0
-    @comments = 0
-  end
-
-  def open_issue(title:, body:)
-    sleep 0.2 # widen the record-before-deliver race window
-    @mutex.synchronize { @opens += 1 }
-    { "number" => @opens, "url" => "http://gh/#{@opens}" }
-  end
-
-  def comment(number:, body:)
-    @mutex.synchronize { @comments += 1 }
-  end
-end
-
-# open_issue succeeds; comment always 502s.
-class BadCommentGitHub
-  def dry_run? = false
-
-  def open_issue(title:, body:) = { "number" => 7, "url" => "http://gh/7" }
-
-  def comment(number:, body:)
-    raise SentryTickets::DeliveryError.new("GitHub API 502: boom", status: 502)
-  end
-end
-
-# Succeeds at open_issue but the comment endpoint 404s, as it does when the
-# tracked issue was deleted on GitHub.
-class GoneCommentGitHub
+# Stands in for SentryTickets::GitHub: every open files issue #42, and every
+# comment lands. Subclasses break one part of that.
+class FakeGitHub
   attr_reader :opens, :comments
 
   def initialize
@@ -65,36 +12,56 @@ class GoneCommentGitHub
     @comments = []
   end
 
-  def dry_run? = false
-
-  def open_issue(title:, body:)
-    @opens << title
-    { "number" => 100 + @opens.size, "url" => "http://gh/#{100 + @opens.size}" }
-  end
-
-  def comment(number:, body:)
-    @comments << number
-    raise SentryTickets::DeliveryError.new("GitHub API 404: Not Found", status: 404)
-  end
-end
-
-class RecordingGitHub
-  attr_reader :opens, :comments
-
-  def initialize
-    @opens = []
-    @comments = []
-  end
-
-  def dry_run? = false
+  def owns?(issue) = !issue.nil? && !issue["number"].nil?
 
   def open_issue(title:, body:)
     @opens << title
     { "number" => 42, "url" => "http://gh/42" }
   end
 
-  def comment(number:, body:)
-    @comments << number
+  def comment(issue, body:)
+    @comments << issue["number"]
+  end
+end
+
+class FailingGitHub < FakeGitHub
+  def open_issue(title:, body:) = raise(SentryTickets::DeliveryError, "GitHub API 502: boom")
+  def comment(issue, body:) = raise(SentryTickets::DeliveryError, "GitHub API 502: boom")
+end
+
+# Fails with raw binary bytes in the message, the way a wrapped
+# JSON::ParserError on a middlebox's garbage response body would.
+class BinaryErrorGitHub < FakeGitHub
+  def open_issue(title:, body:) = raise(SentryTickets::DeliveryError, "boom: \xFF\xFE".b)
+end
+
+class SlowGitHub < FakeGitHub
+  def open_issue(title:, body:)
+    sleep 0.2 # widen the record-before-deliver race window
+    super
+  end
+end
+
+# Opens fine; every comment 502s.
+class BadCommentGitHub < FakeGitHub
+  def comment(issue, body:) = raise(SentryTickets::DeliveryError.new("GitHub API 502: boom", status: 502))
+end
+
+# Every comment finds its issue deleted. Opens are numbered 101, 102, ...
+# and fail while fail_opens is set.
+class GoneCommentGitHub < FakeGitHub
+  attr_accessor :fail_opens
+
+  def open_issue(title:, body:)
+    raise SentryTickets::DeliveryError, "GitHub API 502: boom" if fail_opens
+
+    @opens << title
+    { "number" => 100 + @opens.size, "url" => "http://gh/#{100 + @opens.size}" }
+  end
+
+  def comment(issue, body:)
+    @comments << issue["number"]
+    raise SentryTickets::IssueGone, "GitHub API 404: Not Found"
   end
 end
 
@@ -107,7 +74,7 @@ class TrackerTest < Minitest::Test
   end
 
   def test_first_occurrence_opens_an_issue
-    github = RecordingGitHub.new
+    github = FakeGitHub.new
     action, group = tracker(github).track(Fixture.event, now: T0)
     assert_equal :opened, action
     assert_equal 1, group.count
@@ -116,7 +83,7 @@ class TrackerTest < Minitest::Test
   end
 
   def test_recurrence_within_the_notice_interval_is_suppressed
-    github = RecordingGitHub.new
+    github = FakeGitHub.new
     tracker = tracker(github, notice_interval: SIX_HOURS)
     tracker.track(Fixture.event, now: T0)
     action, group = tracker.track(Fixture.event, now: T0 + 3600)
@@ -126,7 +93,7 @@ class TrackerTest < Minitest::Test
   end
 
   def test_recurrence_after_the_notice_interval_comments
-    github = RecordingGitHub.new
+    github = FakeGitHub.new
     tracker = tracker(github, notice_interval: SIX_HOURS)
     tracker.track(Fixture.event, now: T0)
     action, = tracker.track(Fixture.event, now: T0 + SIX_HOURS + 1)
@@ -135,7 +102,7 @@ class TrackerTest < Minitest::Test
   end
 
   def test_suppressed_recurrences_do_not_move_the_notice_window
-    tracker = tracker(RecordingGitHub.new, notice_interval: SIX_HOURS)
+    tracker = tracker(FakeGitHub.new, notice_interval: SIX_HOURS)
     tracker.track(Fixture.event, now: T0)
     tracker.track(Fixture.event, now: T0 + 60)
     action, group = tracker.track(Fixture.event, now: T0 + SIX_HOURS)
@@ -175,7 +142,7 @@ class TrackerTest < Minitest::Test
     action, group = tracker.track(Fixture.event)
     assert_equal :commented, action
     assert_match(/502/, group.last_error)
-    assert_equal 7, group.issue["number"], "a transient comment failure must keep the issue number"
+    assert_equal 42, group.issue["number"], "a transient comment failure must keep the issue number"
   end
 
   def test_concurrent_first_occurrences_open_one_issue
@@ -186,30 +153,48 @@ class TrackerTest < Minitest::Test
     5.times.map { Thread.new { tracker.track(Fixture.event) } }.each(&:join)
 
     assert_equal 5, store.groups.first.count
-    assert_equal 1, github.opens, "concurrent first occurrences must open exactly one issue"
-    assert_equal 0, github.comments
+    assert_equal 1, github.opens.size, "concurrent first occurrences must open exactly one issue"
+    assert_empty github.comments
   end
 
   def test_dry_run_state_opens_issue_when_delivery_becomes_real
     # README workflow: run without a token first, then "set repo + token and
-    # restart". A fingerprint only ever opened in dry-run mode has no issue
-    # number, so its first due recurrence must open, not comment on
-    # /issues//comments.
+    # restart". An issue filed to the outbox is not one GitHub holds, so the
+    # next occurrence opens a real one, notice window or not.
     dir = Fixture.store_dir
-    dry = tracker(SentryTickets::Outbox.new(File.join(dir, "outbox")), store: Fixture.store(dir), notice_interval: 3600)
-    dry.track(Fixture.event)
+    dry = tracker(SentryTickets::Outbox.new(File.join(dir, "outbox")), store: Fixture.store(dir),
+                                                                        notice_interval: SIX_HOURS)
+    dry.track(Fixture.event, now: T0)
 
-    github = RecordingGitHub.new
-    real = tracker(github, store: Fixture.store(dir))
-    action, group = real.track(Fixture.event)
+    github = FakeGitHub.new
+    real = tracker(github, store: Fixture.store(dir), notice_interval: SIX_HOURS)
+    action, group = real.track(Fixture.event, now: T0 + 60)
     assert_equal :opened, action
     assert_equal 1, github.opens.size
     assert_empty github.comments
     assert_equal "http://gh/42", group.issue_url
 
-    action, = real.track(Fixture.event)
+    action, = real.track(Fixture.event, now: T0 + 60 + SIX_HOURS)
     assert_equal :commented, action, "follow-up recurrences comment on the real issue"
     assert_equal [42], github.comments
+  end
+
+  def test_gone_issue_is_forgotten_even_when_its_replacement_fails_to_open
+    github = GoneCommentGitHub.new
+    tracker = tracker(github, notice_interval: SIX_HOURS)
+    tracker.track(Fixture.event, now: T0)
+
+    github.fail_opens = true
+    action, group = tracker.track(Fixture.event, now: T0 + SIX_HOURS)
+    assert_equal :opened, action
+    assert_nil group.issue
+    assert_match(/502/, group.last_error)
+
+    github.fail_opens = false
+    action, group = tracker.track(Fixture.event, now: T0 + SIX_HOURS + 60)
+    assert_equal :opened, action
+    assert_equal [101], github.comments, "the dead issue is not commented on again"
+    assert_equal "http://gh/102", group.issue_url
   end
 
   def test_delivery_error_with_binary_message_does_not_wedge_state

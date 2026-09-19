@@ -14,13 +14,16 @@ module SentryTickets
 
     def dry_run? = true
 
+    # Any issue: the outbox takes notices for whatever the group was filed as.
+    def owns?(issue) = !issue.nil?
+
     # Returns { "url" => String }: the file's path stands in for the issue's URL.
     def open_issue(title:, body:)
       { "url" => write("issue", title, body) }
     end
 
-    def comment(number:, body:)
-      write("comment", number ? "notice for ##{number}" : "recurrence notice", body)
+    def comment(issue, body:)
+      write("comment", issue["number"] ? "notice for ##{issue['number']}" : "recurrence notice", body)
     end
 
     def self.slugify(text)

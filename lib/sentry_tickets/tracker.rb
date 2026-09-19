@@ -20,8 +20,7 @@ module SentryTickets
     # :suppressed) and the group as it is afterwards.
     def track(event, now: Time.now)
       lock_for(event.fingerprint).synchronize do
-        group = @store.record(event, at: now)
-        deliver(action_for(group, now), group, event, now)
+        deliver(@store.record(event, at: now), event, now)
       end
     end
 
@@ -31,44 +30,33 @@ module SentryTickets
       @locks_mutex.synchronize { @locks[fingerprint] ||= Mutex.new }
     end
 
-    def action_for(group, now)
-      return :opened unless group.issue
-
-      group.notice_due?(now, @notice_interval) ? :commented : :suppressed
-    end
-
-    def deliver(action, group, event, now)
-      case action
-      when :opened
-        open_issue(group, event, now)
-      when :commented
-        if group.issue["number"].nil? && !@destination.dry_run?
-          # The issue only ever existed in dry-run mode (state predates the
-          # token); there is no GitHub issue to comment on, so open one.
-          open_issue(group, event, now)
-        else
-          begin
-            @destination.comment(number: group.issue["number"], body: notice_text(group))
-            [:commented, @store.update(group.fingerprint) { |g| g.delivered(g.issue, at: now) }]
-          rescue DeliveryError => e
-            # The tracked issue number points at nothing on GitHub (the issue
-            # was deleted, or the repo was re-created); open a fresh issue
-            # instead of erroring on every recurrence forever.
-            raise unless e.status == 404
-            open_issue(group, event, now)
-          end
-        end
-      else
-        [:suppressed, group]
+    # Decided from the group alone, so a group whose last delivery failed, or
+    # whose issue the destination does not hold (filed in dry-run, say), gets
+    # its due on whichever occurrence comes next.
+    def deliver(group, event, now)
+      if !@destination.owns?(group.issue) then open_issue(group, event, now)
+      elsif group.notice_due?(now, @notice_interval) then post_notice(group, event, now)
+      else [:suppressed, group]
       end
-    rescue DeliveryError => e
-      [action, @store.update(group.fingerprint) { |g| g.failed(e.message) }]
     end
 
     def open_issue(group, event, now)
       issue = @destination.open_issue(title: event.title, body: Ticket.new(event, group).body)
-      [:opened, @store.update(group.fingerprint) { |g| g.delivered(issue, at: now) }]
+      [:opened, update(group) { |g| g.delivered(issue, at: now) }]
+    rescue DeliveryError => e
+      [:opened, update(group) { |g| g.failed(e.message) }]
     end
+
+    def post_notice(group, event, now)
+      @destination.comment(group.issue, body: notice_text(group))
+      [:commented, update(group) { |g| g.delivered(g.issue, at: now) }]
+    rescue IssueGone
+      open_issue(update(group, &:without_issue), event, now)
+    rescue DeliveryError => e
+      [:commented, update(group) { |g| g.failed(e.message) }]
+    end
+
+    def update(group, &) = @store.update(group.fingerprint, &)
 
     def notice_text(group)
       "Recurrence notice.\n\n" \
