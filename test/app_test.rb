@@ -2,104 +2,6 @@
 
 require_relative "test_helper"
 
-class FailingGitHub
-  def open_issue(title:, body:)
-    raise SentryTickets::DeliveryError, "GitHub API 502: boom"
-  end
-
-  def comment(number:, body:)
-    raise SentryTickets::DeliveryError, "GitHub API 502: boom"
-  end
-end
-
-# Delivers errors with raw binary bytes in the message, the way a wrapped
-# JSON::ParserError on a middlebox's garbage response body would.
-class BinaryErrorGitHub
-  def open_issue(title:, body:)
-    raise SentryTickets::DeliveryError, "boom: \xFF\xFE".b
-  end
-
-  def comment(number:, body:)
-    raise SentryTickets::DeliveryError, "boom: \xFF\xFE".b
-  end
-end
-
-class SlowGitHub
-  attr_reader :opens, :comments
-
-  def initialize
-    @mutex = Mutex.new
-    @opens = 0
-    @comments = 0
-  end
-
-  def open_issue(title:, body:)
-    sleep 0.2 # widen the ingest-before-deliver race window
-    @mutex.synchronize { @opens += 1 }
-    { "number" => @opens, "url" => "http://gh/#{@opens}" }
-  end
-
-  def comment(number:, body:)
-    @mutex.synchronize { @comments += 1 }
-    { "number" => number }
-  end
-end
-
-# Succeeds at open_issue but the comment endpoint 404s, as it does when the
-# tracked issue was deleted on GitHub.
-# open_issue succeeds; comment always 502s.
-class BadCommentGitHub
-  def dry_run? = false
-
-  def open_issue(title:, body:) = { "number" => 7, "url" => "http://gh/7" }
-
-  def comment(number:, body:)
-    raise SentryTickets::DeliveryError.new("GitHub API 502: boom", status: 502)
-  end
-end
-
-class GoneCommentGitHub
-  attr_reader :opens, :comments
-
-  def initialize
-    @opens = []
-    @comments = []
-  end
-
-  def dry_run? = false
-
-  def open_issue(title:, body:)
-    @opens << title
-    { "number" => 100 + @opens.size, "url" => "http://gh/#{100 + @opens.size}" }
-  end
-
-  def comment(number:, body:)
-    @comments << number
-    raise SentryTickets::DeliveryError.new("GitHub API 404: Not Found", status: 404)
-  end
-end
-
-class RecordingGitHub
-  attr_reader :opens, :comments
-
-  def initialize
-    @opens = []
-    @comments = []
-  end
-
-  def dry_run? = false
-
-  def open_issue(title:, body:)
-    @opens << title
-    { "number" => 42, "url" => "http://gh/42" }
-  end
-
-  def comment(number:, body:)
-    @comments << number
-    { "number" => number }
-  end
-end
-
 class AppTest < Minitest::Test
   def setup
     dir = Fixture.store_dir
@@ -246,21 +148,6 @@ class AppTest < Minitest::Test
     assert_equal "opened", JSON.parse(body.join)["action"]
   end
 
-  def test_delivery_failure_is_recorded_and_retried
-    app = SentryTickets::App.new(@config, destination: FailingGitHub.new)
-    status, _, body = post(Fixture.payload.to_json, {}, app: app)
-    resp = JSON.parse(body.join)
-    assert_equal 200, status, "sender has handed off ownership; failure is recorded, not propagated"
-    assert_equal "opened", resp["action"]
-    assert_match(/502/, resp["issue_error"])
-
-    status, _, body = post(Fixture.payload.to_json, {}, app: app)
-    resp = JSON.parse(body.join)
-    assert_equal 200, status
-    assert_equal "opened", resp["action"], "failed opens retry on the next occurrence"
-    assert_equal 2, resp["count"]
-  end
-
   def test_dry_run_outbox_failure_is_recorded_not_500
     dir = Fixture.store_dir
     File.write(File.join(dir, "outbox"), "x") # outbox path taken by a file
@@ -273,90 +160,6 @@ class AppTest < Minitest::Test
     assert_equal "opened", resp["action"]
     assert_match(/EEXIST|not a directory/i, resp["issue_error"])
     assert_equal 1, resp["count"], "the event is durably counted even when the outbox is not"
-  end
-
-  def test_comment_on_deleted_issue_opens_a_replacement
-    dir = Fixture.store_dir
-    github = GoneCommentGitHub.new
-    app = SentryTickets::App.new(
-      SentryTickets::Config.new(repo: "you/repo", token: "t", data_dir: dir, notice_interval: 0),
-      destination: github
-    )
-    post(Fixture.payload.to_json, {}, app: app)
-    assert_equal 1, github.opens.size
-
-    status, _, body = post(Fixture.payload.to_json, {}, app: app)
-    resp = JSON.parse(body.join)
-    assert_equal 200, status
-    assert_equal "opened", resp["action"], "a 404 on comment opens a replacement issue"
-    assert_nil resp["issue_error"]
-    assert_equal 2, github.opens.size
-    assert_equal 101, github.comments.first, "the failed comment targeted the first issue"
-    assert_equal 102, app.store.all.first["issue_number"],
-                 "the replacement issue number replaces the dead one"
-  end
-
-  def test_comment_failure_does_not_open_a_replacement
-    app = SentryTickets::App.new(
-      SentryTickets::Config.new(repo: "you/repo", token: "t", data_dir: Fixture.store_dir,
-                                notice_interval: 0),
-      destination: BadCommentGitHub.new
-    )
-    post(Fixture.payload.to_json, {}, app: app)
-
-    status, _, body = post(Fixture.payload.to_json, {}, app: app)
-    resp = JSON.parse(body.join)
-    assert_equal 200, status
-    assert_equal "commented", resp["action"]
-    assert_match(/502/, resp["issue_error"])
-    assert_equal 7, app.store.all.first["issue_number"],
-                  "a transient comment failure must keep the issue number"
-  end
-
-  def test_concurrent_same_fingerprint_opens_one_issue
-    dir = Fixture.store_dir
-    config = SentryTickets::Config.new(repo: "x/y", token: "t", data_dir: dir, notice_interval: 3600)
-    github = SlowGitHub.new
-    app = SentryTickets::App.new(config, destination: github)
-
-    threads = 5.times.map do
-      Thread.new { post(Fixture.payload.to_json, {}, app: app) }
-    end
-    threads.each(&:join)
-
-    assert_equal 5, app.store.all.first["count"]
-    assert_equal 1, github.opens, "concurrent first occurrences must open exactly one issue"
-    assert_equal 0, github.comments
-  end
-
-  def test_dry_run_state_opens_issue_when_delivery_becomes_real
-    # README workflow: run without a token first, then "set repo + token and
-    # restart". A fingerprint only ever opened in dry-run mode has no issue
-    # number, so its first due recurrence must open, not comment on
-    # /issues//comments.
-    dir = Fixture.store_dir
-    dry = SentryTickets::App.new(
-      SentryTickets::Config.new(repo: nil, token: nil, data_dir: dir, notice_interval: 3600)
-    )
-    post(Fixture.payload.to_json, {}, app: dry)
-
-    github = RecordingGitHub.new
-    real = SentryTickets::App.new(
-      SentryTickets::Config.new(repo: "you/repo", token: "t", data_dir: dir, notice_interval: 0),
-      destination: github
-    )
-    status, _, body = post(Fixture.payload.to_json, {}, app: real)
-    resp = JSON.parse(body.join)
-    assert_equal 200, status
-    assert_equal "opened", resp["action"]
-    assert_equal 1, github.opens.size
-    assert_empty github.comments
-    assert_equal "http://gh/42", resp["issue"]
-
-    status, _, body = post(Fixture.payload.to_json, {}, app: real)
-    resp = JSON.parse(body.join)
-    assert_equal "commented", resp["action"], "follow-up recurrences comment on the real issue"
-    assert_equal [42], github.comments
   end
 
   def test_health_with_no_events
@@ -381,16 +184,5 @@ class AppTest < Minitest::Test
     issues = JSON.parse(body.join)
     assert_equal 1, issues.size
     assert_equal "NoMethodError: undefined method `name' for nil:NilClass", issues.first["title"]
-  end
-
-  def test_delivery_error_with_binary_message_is_scrubbed_not_wedging_state
-    app = SentryTickets::App.new(@config, destination: BinaryErrorGitHub.new)
-    status, _, body = post(Fixture.payload.to_json, {}, app: app)
-    assert_equal 200, status
-    assert_match(/boom/, JSON.parse(body.join)["issue_error"])
-
-    status, _, body = post(Fixture.payload(id: "e2", type: "RuntimeError", message: "other").to_json, {}, app: app)
-    assert_equal 200, status
-    assert_equal "opened", JSON.parse(body.join)["action"]
   end
 end

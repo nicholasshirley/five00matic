@@ -11,6 +11,7 @@ require_relative "sentry_tickets/ticket"
 require_relative "sentry_tickets/delivery_error"
 require_relative "sentry_tickets/github"
 require_relative "sentry_tickets/outbox"
+require_relative "sentry_tickets/tracker"
 require_relative "sentry_tickets/app"
 
 # Receives Sentry-shaped error events from the sentry-ruby SDK (via a
