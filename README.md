@@ -67,19 +67,21 @@ In the app's Sentry init, intercept in `before_send` and deliver to the
 receiver:
 
 ```ruby
-TICKET_URL = ENV.fetch("TICKET_URL", "http://127.0.0.1:9292/events")
+TICKET_URI = URI(ENV.fetch("TICKET_URL", "http://127.0.0.1:9292/events"))
 
 Sentry.init do |config|
   config.dsn = ENV.fetch("SENTRY_DSN") # keep a valid DSN; the SDK needs it to enable sending
 
   config.before_send = lambda do |event, _hint|
-    uri = URI(TICKET_URL)
-    begin
-      Net::HTTP.post(uri, event.to_json_compatible.to_json, "Content-Type" => "application/json")
-      nil # returning nil stops the event from going to Sentry at all
-    rescue StandardError
-      event # receiver unreachable: fall back to Sentry rather than losing the event
+    response = Net::HTTP.start(TICKET_URI.host, TICKET_URI.port,
+                               use_ssl: TICKET_URI.scheme == "https", open_timeout: 2) do |http|
+      http.post(TICKET_URI.path, event.to_json_compatible.to_json, "Content-Type" => "application/json")
     end
+    # nil stops the event from going to Sentry at all; only do that once the
+    # receiver has taken it
+    response.is_a?(Net::HTTPSuccess) ? nil : event
+  rescue StandardError
+    event # receiver unreachable: fall back to Sentry rather than losing the event
   end
 end
 ```
@@ -87,10 +89,14 @@ end
 Notes:
 
 - Returning `event` instead of `nil` double-sends (Sentry + receiver).
-- If the POST raises (receiver down), the SDK's background worker logs the
-  error and drops the event - and returning `nil` means Sentry never saw it
-  either. The rescue above returns `event` so Sentry takes it as a fallback;
-  drop the rescue if you would rather lose the event than double-report.
+- If the POST raises (receiver down) or is refused (any non-2xx), returning
+  `nil` would lose the event: Sentry never sees it and neither does GitHub.
+  The hook above returns `event` in both cases so Sentry takes it as a
+  fallback; drop that if you would rather lose the event than double-report.
+- The receiver delivers to GitHub inline, so it answers only as fast as
+  GitHub does; the SDK worker waits for it (Net::HTTP's default read timeout
+  is 60s). The short open timeout keeps an unreachable receiver from holding
+  the worker that long.
 - The hook already runs on a background worker thread in the SDK; the POST is
   the only added latency. Keep it small, or queue it if your app also has a
   job system.
