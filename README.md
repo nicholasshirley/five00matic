@@ -7,7 +7,7 @@ recurrence notices. No dependency on Sentry's servers and no dependency on
 any gem beyond the Ruby stdlib (+ rack compatibility for mounting).
 
 Built against the payload shape of sentry-ruby 5.10 / sentry-rails 5.10 as
-installed under RVM Ruby 3.2.0, but the code runs on plain modern Ruby
+installed under RVM Ruby 3.2.0, but the code runs on plain Ruby 3.2 or newer
 (verified on 3.2 and 3.4) with zero installed gems.
 
 ## Layout
@@ -34,7 +34,7 @@ data/                          groups.json + outbox/ (gitignored)
 
 ## Running
 
-No gems to install. Any modern Ruby works (3.2/3.4 verified):
+No gems to install. Ruby 3.2 or newer (3.2/3.4 verified):
 
 ```sh
 # tests
@@ -97,7 +97,7 @@ Notes:
 - `before_send` is the only intake. Don't point `SENTRY_DSN` at the receiver:
   the SDK would post envelopes to `/api/<project>/envelope/`, which it does
   not serve.
-- The event hash the hook receives is exactly what this receiver stores and
+- The event hash the hook receives is exactly what this receiver groups and
   renders, including the full raw payload at the bottom of the ticket.
 
 ## Behavior
@@ -129,10 +129,10 @@ Notes:
   compact JSON and is clipped first; only an event whose structured sections
   alone overflow gets those clipped too.
 - **State** is a single JSON file (`data/groups.json`) written atomically;
-  restarts and redeploys keep counts and throttle anchors. State and outbox files carry
-  event content (user ids, request bodies) and are written owner-only
-  (0600). For a real deployment behind a load balancer, put state on shared
-  storage or keep a single instance.
+  restarts and redeploys keep counts and throttle anchors. State and outbox
+  files carry event content (user ids, request bodies) and are written
+  owner-only (0600). For a real deployment behind a load balancer, put state
+  on shared storage or keep a single instance.
 
 ## Known simplifications (prototype scope)
 
@@ -141,7 +141,7 @@ Notes:
   before the response arrives, the retry opens a duplicate issue. Issue
   creation has no idempotency key.
 - Single-node state file; not multi-process safe. Within one process the
-  ingest-to-delivery path is serialized per fingerprint, so a single
+  record-to-delivery path is serialized per fingerprint, so a single
   instance will not double-open an issue.
 - `bin/serve.rb` is a convenience, not a server: thread-per-connection, no
   read or header timeouts, no chunked-encoding or request-size limits. A

@@ -48,9 +48,7 @@ class AppTest < Minitest::Test
 
   def test_recurrence_comments_when_notice_is_due
     post(Fixture.payload.to_json)
-    status, _, body = post(Fixture.payload.to_json) # notice_interval=0, but...
-    # ...second hit sees issue_pending and last_notice_at just set -> still
-    # due (0 interval) -> commented
+    status, _, body = post(Fixture.payload.to_json) # notice_interval 0: due at once
     resp = JSON.parse(body.join)
     assert_equal 200, status
     assert_equal "commented", resp["action"]

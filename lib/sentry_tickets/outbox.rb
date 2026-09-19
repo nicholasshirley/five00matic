@@ -46,7 +46,7 @@ module SentryTickets
       file
     rescue SystemCallError, IOError => e
       # Match GitHub: a failed delivery is recorded and retried on the next
-      # occurrence, it does not 500 the ingest.
+      # occurrence, it does not 500 the request.
       raise DeliveryError, "#{e.class}: #{e.message}"
     end
   end

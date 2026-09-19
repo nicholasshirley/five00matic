@@ -11,7 +11,7 @@ module SentryTickets
     :fingerprint, :title, :release, :environment,
     :count, :first_seen, :last_seen, :last_event_id,
     # What the destination returned on opening it, e.g. GitHub's
-    # { "number" => 7, "url" => "https://github.com/..." }.
+    # { "repo" => "you/app", "number" => 7, "url" => "https://github.com/..." }.
     :issue,
     # The window for the next recurrence notice starts at last_notice_at;
     # last_notice_count is the count that notice reported.
