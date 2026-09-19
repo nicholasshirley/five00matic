@@ -90,9 +90,17 @@ module SentryTickets
           # token); there is no GitHub issue to comment on, so open one.
           open_issue(rec, event)
         else
-          @github.comment(number: rec["issue_number"], body: notice_text(rec))
-          @store.record_delivered(fp)
-          :commented
+          begin
+            @github.comment(number: rec["issue_number"], body: notice_text(rec))
+            @store.record_delivered(fp)
+            :commented
+          rescue DeliveryError => e
+            # The tracked issue number points at nothing on GitHub (the issue
+            # was deleted, or the repo was re-created); open a fresh issue
+            # instead of erroring on every recurrence forever.
+            raise unless e.status == 404
+            open_issue(rec, event)
+          end
         end
       else # :suppressed
         action

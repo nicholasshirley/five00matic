@@ -110,6 +110,9 @@ Notes:
 - **Delivery failures** are recorded on the fingerprint and retried on the
   next occurrence (the count was already persisted, so no event is lost); the
   HTTP response still reports 200 because the sender has handed off ownership.
+  If GitHub answers 404 for a recurrence comment (the tracked issue was
+  deleted, or the repo was re-created), a replacement issue is opened instead
+  of erroring on every recurrence forever.
 - **Ticket size**: GitHub rejects issue bodies over 65,536 characters, so
   rendered tickets are capped below that. The raw-payload section switches to
   compact JSON and is clipped first; only an event whose structured sections

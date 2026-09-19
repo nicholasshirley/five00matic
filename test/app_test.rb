@@ -45,6 +45,40 @@ class SlowGitHub
   end
 end
 
+# Succeeds at open_issue but the comment endpoint 404s, as it does when the
+# tracked issue was deleted on GitHub.
+# open_issue succeeds; comment always 502s.
+class BadCommentGitHub
+  def dry_run? = false
+
+  def open_issue(title:, body:) = { "number" => 7, "url" => "http://gh/7" }
+
+  def comment(number:, body:)
+    raise SentryTickets::DeliveryError.new("GitHub API 502: boom", status: 502)
+  end
+end
+
+class GoneCommentGitHub
+  attr_reader :opens, :comments
+
+  def initialize
+    @opens = []
+    @comments = []
+  end
+
+  def dry_run? = false
+
+  def open_issue(title:, body:)
+    @opens << title
+    { "number" => 100 + @opens.size, "url" => "http://gh/#{100 + @opens.size}" }
+  end
+
+  def comment(number:, body:)
+    @comments << number
+    raise SentryTickets::DeliveryError.new("GitHub API 404: Not Found", status: 404)
+  end
+end
+
 class RecordingGitHub
   attr_reader :opens, :comments
 
@@ -291,6 +325,44 @@ class AppTest < Minitest::Test
     assert_equal 200, status
     assert_equal "opened", resp["action"], "failed opens retry on the next occurrence"
     assert_equal 2, resp["count"]
+  end
+
+  def test_comment_on_deleted_issue_opens_a_replacement
+    dir = Fixture.store_dir
+    github = GoneCommentGitHub.new
+    app = SentryTickets::App.new(
+      SentryTickets::Config.new(repo: "you/repo", token: "t", data_dir: dir, notice_interval: 0),
+      github: github
+    )
+    post(Fixture.event.to_json, {}, app: app)
+    assert_equal 1, github.opens.size
+
+    status, _, body = post(Fixture.event.to_json, {}, app: app)
+    resp = JSON.parse(body.join)
+    assert_equal 200, status
+    assert_equal "opened", resp["action"], "a 404 on comment opens a replacement issue"
+    assert_nil resp["issue_error"]
+    assert_equal 2, github.opens.size
+    assert_equal 101, github.comments.first, "the failed comment targeted the first issue"
+    assert_equal 102, app.store.all.first["issue_number"],
+                 "the replacement issue number replaces the dead one"
+  end
+
+  def test_comment_failure_does_not_open_a_replacement
+    app = SentryTickets::App.new(
+      SentryTickets::Config.new(repo: "you/repo", token: "t", data_dir: Fixture.store_dir,
+                                notice_interval: 0),
+      github: BadCommentGitHub.new
+    )
+    post(Fixture.event.to_json, {}, app: app)
+
+    status, _, body = post(Fixture.event.to_json, {}, app: app)
+    resp = JSON.parse(body.join)
+    assert_equal 200, status
+    assert_equal "commented", resp["action"]
+    assert_match(/502/, resp["issue_error"])
+    assert_equal 7, app.store.all.first["issue_number"],
+                  "a transient comment failure must keep the issue number"
   end
 
   def test_concurrent_same_fingerprint_opens_one_issue

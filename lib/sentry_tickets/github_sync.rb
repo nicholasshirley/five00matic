@@ -7,7 +7,15 @@ require "fileutils"
 require "digest/sha2"
 
 module SentryTickets
-  class DeliveryError < StandardError; end
+  class DeliveryError < StandardError
+    # The HTTP status GitHub answered with, when there was a response at all.
+    attr_reader :status
+
+    def initialize(message = nil, status: nil)
+      @status = status
+      super(message)
+    end
+  end
 
   # Minimal GitHub REST client, stdlib only.
   #
@@ -90,7 +98,7 @@ module SentryTickets
       res = http.request(req)
       unless res.code.to_i.between?(200, 299)
         detail = self.class.scrub(res.body.to_s)[0, 300]
-        raise DeliveryError, "GitHub API #{res.code}: #{detail}"
+        raise DeliveryError.new("GitHub API #{res.code}: #{detail}", status: res.code.to_i)
       end
 
       JSON.parse(res.body)
