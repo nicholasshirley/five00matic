@@ -116,8 +116,10 @@ module SentryTickets
         loc = [f["filename"] || f["abs_path"], f["lineno"]].compact.join(":")
         func = f["function"] ? (f["module"] ? "#{f['module']}.#{f['function']}" : f["function"]) : nil
         out << "-- #{func || 'frame'} at #{loc}"
-        pre = f["pre_context"] || []
-        post = f["post_context"] || []
+        # Foreign events may carry garbage here; the value is a list of
+        # source lines, anything else is dropped like App#normalize does.
+        pre = f["pre_context"].is_a?(Array) ? f["pre_context"] : []
+        post = f["post_context"].is_a?(Array) ? f["post_context"] : []
         if pre.any? || f["context_line"] || post.any?
           pre.each { |ln| out << "    #{context_text(ln)}" }
           out << ">   #{f['context_line'].to_s.chomp}" if f["context_line"]

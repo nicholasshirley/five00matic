@@ -312,6 +312,18 @@ class AppTest < Minitest::Test
     assert_includes outbox, "caf\uFFFD" # replacement char, not a crash
   end
 
+  def test_non_finite_floats_are_dropped_at_intake
+    # 1e999 parses to Float::INFINITY; JSON.generate refuses it, so the
+    # ticket's raw payload would otherwise fail on every delivery attempt.
+    event = Fixture.event(breadcrumbs: [Fixture.breadcrumb("http", "GET /x")])
+    body = event.to_json.sub("1758268800.123", "1e999")
+    status, _, resp_body = post(body)
+    assert_equal 200, status
+    assert_equal "opened", JSON.parse(resp_body.join)["action"]
+    ticket = File.read(outbox_files.first)
+    assert_includes ticket, "[INFO] ? http", "the non-finite timestamp renders as unknown"
+  end
+
   def test_delivery_failure_is_recorded_and_retried
     app = SentryTickets::App.new(@config, github: FailingGitHub.new)
     status, _, body = post(Fixture.event.to_json, {}, app: app)

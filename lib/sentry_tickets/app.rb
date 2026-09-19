@@ -182,7 +182,12 @@ module SentryTickets
       when Array
         obj.map { |v| scrub_encoding(v) }
       when String
-        obj.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD")
+        obj.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "�")
+      when Float
+        # 1e999/-1e999 in the payload parse as infinities (and a NaN literal
+        # with a permissive parser), which JSON.generate then refuses; the
+        # ticket's raw-payload section would fail on every delivery attempt.
+        obj.finite? ? obj : nil
       else obj
       end
     end

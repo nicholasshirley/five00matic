@@ -55,6 +55,26 @@ class TicketTest < Minitest::Test
     assert_includes body, "          end"
   end
 
+  def test_stacktrace_tolerates_non_array_frame_context
+    event = Fixture.event
+    frame = event.dig("exception", "values").last["stacktrace"]["frames"].last
+    frame["pre_context"] = "garbage"
+    frame["post_context"] = "garbage"
+    body = SentryTickets::Ticket.new(event, @rec).body
+    assert_includes body, "-- Order.load"
+  end
+
+  def test_breadcrumb_with_out_of_range_numeric_timestamp_renders_unknown
+    # Time.at holds any Bignum, but not a non-finite Float; a foreign event
+    # carrying one (or rendered from a hand-built hash) must not abort the
+    # rest of the ticket.
+    crumbs = [Fixture.breadcrumb("http", "GET /x", timestamp: nil),
+              Fixture.breadcrumb("redis", "get k", timestamp: "not-a-ts-but-a-string")]
+    body = SentryTickets::Ticket.new(Fixture.event(breadcrumbs: crumbs), @rec).body
+    assert_includes body, "[INFO] ? http"
+    assert_includes body, "not-a-ts-but-a-string redis"
+  end
+
   def test_stacktrace_context_accepts_lineno_text_pairs
     event = Fixture.event
     frames = event.dig("exception", "values").last["stacktrace"]["frames"]
