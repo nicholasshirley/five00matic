@@ -158,6 +158,13 @@ class StoreTest < Minitest::Test
            "state must reload and re-serialize after a binary error message"
   end
 
+  def test_state_file_is_owner_readable_only
+    dir = Fixture.store_dir
+    store = Fixture.store(dir)
+    store.ingest(Fixture.event, now: T0)
+    assert_equal 0o600, File.stat(File.join(dir, "state.json")).mode & 0o777
+  end
+
   def test_title_for_exception_event
     assert_equal "NoMethodError: undefined method `name' for nil:NilClass",
                  SentryTickets::Store.title_for(Fixture.event)

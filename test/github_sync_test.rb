@@ -48,6 +48,12 @@ class GitHubSyncTest < Minitest::Test
     refute_equal files[0], files[1]
   end
 
+  def test_outbox_files_are_owner_readable_only
+    r = SentryTickets::GitHubSync.new(repo: nil, token: nil, outbox_dir: @outbox)
+              .open_issue(title: "boom", body: "the body")
+    assert_equal 0o600, File.stat(r["outbox"]).mode & 0o777
+  end
+
   def test_unwritable_outbox_wraps_as_delivery_error
     file = File.join(Dir.mktmpdir, "a-file")
     File.write(file, "x")

@@ -119,7 +119,9 @@ module SentryTickets
       # same-second writes do not overwrite each other.
       digest = Digest::SHA256.hexdigest(text)[0, 8]
       file = File.join(@outbox_dir, "#{kind}-#{self.class.slugify(title)}.#{digest}.#{stamp}.md")
-      File.write(file, "# #{title}\n\n#{text}\n")
+      # Outbox files carry full event payloads (user ids, request bodies);
+      # keep them readable by the owner only.
+      File.write(file, "# #{title}\n\n#{text}\n", perm: 0o600)
       file
     rescue SystemCallError, IOError => e
       # Match the network path: a failed delivery is recorded and retried on

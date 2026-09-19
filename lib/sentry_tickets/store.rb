@@ -182,7 +182,10 @@ module SentryTickets
     # Caller holds @mutex.
     def persist!
       FileUtils.mkdir_p(File.dirname(@path))
-      File.write("#{@path}.tmp", JSON.pretty_generate(@state))
+      # Titles and last_errors are built from event content; keep the state
+      # file readable by the owner only (the tmp-then-rename dance means the
+      # permission is set on every write).
+      File.write("#{@path}.tmp", JSON.pretty_generate(@state), perm: 0o600)
       File.rename("#{@path}.tmp", @path)
     end
   end

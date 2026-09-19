@@ -118,8 +118,10 @@ Notes:
   compact JSON and is clipped first; only an event whose structured sections
   alone overflow gets those clipped too.
 - **State** is a single JSON file written atomically; restarts and
-  redeploys keep counts and throttle anchors. For a real deployment behind a
-  load balancer, put state on shared storage or keep a single instance.
+  redeploys keep counts and throttle anchors. State and outbox files carry
+  event content (user ids, request bodies) and are written owner-only
+  (0600). For a real deployment behind a load balancer, put state on shared
+  storage or keep a single instance.
 
 ## Known simplifications (prototype scope)
 
