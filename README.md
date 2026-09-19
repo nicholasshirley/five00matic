@@ -105,7 +105,9 @@ Notes:
 ## Known simplifications (prototype scope)
 
 - Inline delivery, no queue (fine at dormant-project scale).
-- Single-node state file; not multi-process safe.
+- Single-node state file; not multi-process safe. Within one process the
+  ingest-to-delivery path is serialized per fingerprint, so a single
+  instance will not double-open an issue.
 - Fingerprinting is intentionally simple; Sentry's own is deeper (normalized
   frames, in_app heuristics, user-supplied fingerprint arrays are honored).
 - Gzip'd envelopes are accepted (the SDK gzips payloads >= 30KB).

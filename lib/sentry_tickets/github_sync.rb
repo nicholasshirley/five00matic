@@ -82,7 +82,11 @@ module SentryTickets
 
       res = http.request(req)
       unless res.code.to_i.between?(200, 299)
-        raise DeliveryError, "GitHub API #{res.code}: #{res.body.to_s[0, 300]}"
+        # Net::HTTP leaves the body in binary encoding; normalize it before
+        # the message lands in state (it is re-serialized to JSON in
+        # responses) or a non-UTF-8 response could wedge that too.
+        detail = res.body.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
+        raise DeliveryError, "GitHub API #{res.code}: #{detail[0, 300]}"
       end
 
       JSON.parse(res.body)
