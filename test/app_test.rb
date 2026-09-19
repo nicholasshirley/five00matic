@@ -148,7 +148,7 @@ class AppTest < Minitest::Test
     assert_includes content, "<details>"
   end
 
-  def test_recurrence_suppressed_then_commented
+  def test_recurrence_comments_when_notice_is_due
     post(Fixture.event.to_json)
     status, _, body = post(Fixture.event.to_json) # notice_interval=0, but...
     # ...second hit sees issue_pending and last_notice_at just set -> still
@@ -293,8 +293,8 @@ class AppTest < Minitest::Test
     assert_includes JSON.parse(body.join)["error"], "unrecognized"
   end
 
-  def test_non_utf8_bytes_do_not_break_the_pipeline
-    raw = Fixture.event.to_json.sub('"pro"', '"pro\u00e9"') # valid escape, still exercises render
+  def test_escaped_unicode_in_json_payload_is_accepted
+    raw = Fixture.event.to_json.sub('"pro"', '"proé"') # valid escape, still exercises render
     status, _, body = post(raw)
     assert_equal 200, status
     assert_equal "opened", JSON.parse(body.join)["action"]

@@ -132,6 +132,10 @@ Notes:
 - Single-node state file; not multi-process safe. Within one process the
   ingest-to-delivery path is serialized per fingerprint, so a single
   instance will not double-open an issue.
+- `bin/serve.rb` is a convenience, not a server: thread-per-connection, no
+  read or header timeouts, no chunked-encoding or request-size limits. A
+  slow client can hold a thread open; a hostile one can hold many. For
+  anything but local use, run `config.ru` behind a real app server instead.
 - Fingerprinting is intentionally simple; Sentry's own is deeper (normalized
   frames, in_app heuristics, user-supplied fingerprint arrays are honored).
 - Gzip'd envelopes are accepted (the SDK gzips payloads >= 30KB).
