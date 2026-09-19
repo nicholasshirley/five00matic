@@ -166,7 +166,7 @@ class AppTest < Minitest::Test
 
   def test_distinct_error_opens_second_issue
     post(Fixture.payload.to_json)
-    other = Fixture.payload(id: "deadbeef-0000-4000-8000-000000000000", type: "RuntimeError", value: "kaput")
+    other = Fixture.payload(id: "deadbeef-0000-4000-8000-000000000000", type: "RuntimeError", message: "kaput")
     _, _, body = post(other.to_json)
     resp = JSON.parse(body.join)
     assert_equal "opened", resp["action"]
@@ -407,7 +407,7 @@ class AppTest < Minitest::Test
     assert_equal 200, status
     assert_match(/boom/, JSON.parse(body.join)["issue_error"])
 
-    status, _, body = post(Fixture.payload(id: "e2", type: "RuntimeError", value: "other").to_json, {}, app: app)
+    status, _, body = post(Fixture.payload(id: "e2", type: "RuntimeError", message: "other").to_json, {}, app: app)
     assert_equal 200, status
     assert_equal "opened", JSON.parse(body.join)["action"]
   end

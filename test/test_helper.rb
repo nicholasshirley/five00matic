@@ -24,10 +24,13 @@ module Fixture
     f
   end
 
+  # value is what the SDK sends: Exception#detailed_message, which puts
+  # " (Type)" after the message and error_highlight lines beneath it.
   def self.payload(
     id: "e0f1a2b3-c4d5-4e6f-a7b8-9c0d1e2f3a4b",
     type: "NoMethodError",
-    value: "undefined method `name' for nil:NilClass",
+    message: "undefined method `name' for nil:NilClass",
+    value: "#{message} (#{type})\n\n    <%= @customer.name %>\n                 ^^^^^",
     frame_lineno: 26,
     fingerprint: [],
     breadcrumbs: nil
@@ -51,7 +54,7 @@ module Fixture
       "fingerprint" => fingerprint,
       "exception" => {
         "values" => [
-          { "type" => "ArgumentError", "value" => "missing required parameter: user_id",
+          { "type" => "ArgumentError", "value" => "missing required parameter: user_id (ArgumentError)",
             "stacktrace" => { "frames" => [frame(5, function: "validate!")] } },
           { "type" => type, "value" => value,
             "stacktrace" => { "frames" => [frame(12, function: "index"),

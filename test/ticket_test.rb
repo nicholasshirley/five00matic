@@ -32,12 +32,13 @@ class TicketTest < Minitest::Test
   end
 
   def test_exception_chain_shows_raised_first_with_cause
-    body = @ticket.body
-    nme = body.index("NoMethodError: undefined method")
-    arg = body.index("**Caused by:** ArgumentError: missing required parameter")
-    assert nme, "raised exception missing"
-    assert arg, "cause chain missing"
-    assert nme < arg, "raised exception must precede its cause"
+    assert_includes @ticket.body, <<~MARKDOWN
+      ## Exception
+
+      NoMethodError: undefined method `name' for nil:NilClass
+
+      **Caused by:** ArgumentError: missing required parameter: user_id
+    MARKDOWN
   end
 
   def test_stacktrace_crash_frame_first_with_context_highlight

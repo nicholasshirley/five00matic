@@ -25,8 +25,8 @@ class EventTest < Minitest::Test
   def test_fingerprint_ignores_the_message
     # Ruby 3.2's NoMethodError embeds the receiver's inspect, so every
     # occurrence of one bug carries a different address.
-    a = Fixture.event(value: "undefined method `name' for #<User:0x0000000109a275d8 @id=60> (NoMethodError)")
-    b = Fixture.event(value: "undefined method `name' for #<User:0x00000001033c1f20 @id=61> (NoMethodError)")
+    a = Fixture.event(message: "undefined method `name' for #<User:0x0000000109a275d8 @id=60>")
+    b = Fixture.event(message: "undefined method `name' for #<User:0x00000001033c1f20 @id=61>")
     assert_equal a.fingerprint, b.fingerprint
   end
 
@@ -84,8 +84,18 @@ class EventTest < Minitest::Test
     assert_equal "NoMethodError: undefined method `name' for nil:NilClass", Fixture.event.title
   end
 
-  def test_title_for_exception_value_with_type_prefix
-    assert_equal "NoMethodError: already prefixed", Fixture.event(value: "NoMethodError: already prefixed").title
+  def test_title_for_exception_value_without_detailed_message
+    # Rubies before 3.2 have no detailed_message; the SDK sends the bare message.
+    assert_equal "NoMethodError: undefined method `name' for nil:NilClass",
+                 Fixture.event(value: "undefined method `name' for nil:NilClass").title
+  end
+
+  def test_title_for_exception_raised_without_a_message
+    assert_equal "StandardError", Fixture.event(type: "StandardError", message: "StandardError").title
+  end
+
+  def test_title_for_namespaced_exception
+    assert_equal "Deep::Oops: x", Fixture.event(type: "Deep::Oops", message: "x").title
   end
 
   def test_title_for_message_event

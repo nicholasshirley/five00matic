@@ -86,8 +86,8 @@ class StoreTest < Minitest::Test
     store = Fixture.store(dir)
     base = Time.utc(2026, 9, 19, 12)
     store.ingest(Fixture.event(id: "a"), now: base)
-    store.ingest(Fixture.event(id: "b", type: "RuntimeError", value: "boom b"), now: base + 0.5)
-    store.ingest(Fixture.event(id: "c", type: "ArgumentError", value: "boom c"), now: base + 1)
+    store.ingest(Fixture.event(id: "b", type: "RuntimeError", message: "boom b"), now: base + 0.5)
+    store.ingest(Fixture.event(id: "c", type: "ArgumentError", message: "boom c"), now: base + 1)
 
     assert_equal %w[c b a], store.all.map { |r| r["last_event_id"] }
   end

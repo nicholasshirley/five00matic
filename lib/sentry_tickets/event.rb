@@ -53,7 +53,7 @@ module SentryTickets
     end
 
     def title
-      text = raised ? raised.summary : (message || "<no message>").to_s.lines.first.to_s
+      text = raised ? raised.summary : message.to_s.lines.first.to_s
       text = text.gsub(/[[:space:]]+/, " ").strip
       text = "<no message>" if text.empty?
       text.length > TITLE_LIMIT ? "#{text[0, TITLE_LIMIT - 3]}..." : text
@@ -67,18 +67,14 @@ module SentryTickets
 
       def type = @data["type"].to_s
 
-      # The SDK's value field carries Exception#detailed_message: the message
-      # on the first line, with anything else the exception adds beneath it.
-      def first_line = @data["value"].to_s.lines.first.to_s
+      # The SDK fills value with Exception#detailed_message, which (Ruby 3.2+)
+      # appends " (Type)" to the message's first line and may add
+      # error_highlight or did_you_mean lines beneath it.
+      def message = @data["value"].to_s.lines.first.to_s.chomp.delete_suffix(" (#{type})")
 
-      # "Type: message", tolerating values that already carry the "Type: "
-      # prefix (SDK detailed_message) or don't (hand-built events).
-      def summary
-        first = first_line
-        return type if first.empty?
-
-        first.start_with?("#{type}: ") ? first : "#{type}: #{first}"
-      end
+      # "Type: message", or just the type when there is no message of its own
+      # (an exception raised without one reports its class name).
+      def summary = message.empty? || message == type ? type : "#{type}: #{message}"
 
       # Ordered as the SDK sends them: oldest first, crash site last.
       def frames
@@ -139,7 +135,7 @@ module SentryTickets
       return [message.to_s] unless raised
 
       frames = raised.app_frames
-      return [raised.type, raised.first_line.chomp] if frames.empty?
+      return [raised.type, raised.message] if frames.empty?
 
       [raised.type, *frames.map { |f| "#{f.filename}:#{f.label}" }]
     end
