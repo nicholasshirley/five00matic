@@ -71,7 +71,15 @@ module SentryTickets
     end
 
     def all
-      @state.values.sort_by { |r| r["last_seen"] || "" }.reverse
+      @state.values.sort_by { |r| self.class.sort_time(r["last_seen"]) }.reverse
+    end
+
+    # iso8601 strings only sort lexicographically within one precision:
+    # "...00.5Z" sorts before "...00Z" though it is the later instant.
+    def self.sort_time(value)
+      Time.iso8601(value)
+    rescue ArgumentError, TypeError
+      Time.at(0)
     end
 
     def tracked

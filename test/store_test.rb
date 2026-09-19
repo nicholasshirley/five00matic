@@ -122,6 +122,17 @@ class StoreTest < Minitest::Test
     assert_equal "GitHub API 502: boom", store.all.first["last_error"]
   end
 
+  def test_all_orders_by_seen_instant_across_precisions
+    dir = Fixture.store_dir
+    store = Fixture.store(dir)
+    base = Time.utc(2026, 9, 19, 12)
+    store.ingest(Fixture.event(id: "a"), now: base)
+    store.ingest(Fixture.event(id: "b", type: "RuntimeError", value: "boom b"), now: base + 0.5)
+    store.ingest(Fixture.event(id: "c", type: "ArgumentError", value: "boom c"), now: base + 1)
+
+    assert_equal %w[c b a], store.all.map { |r| r["last_event_id"] }
+  end
+
   def test_persists_across_instances
     dir = Fixture.store_dir
     store = Fixture.store(dir)
