@@ -86,15 +86,8 @@ module SentryTickets
       lines.join("\n")
     end
 
-    # App frames when the SDK marked any, crash site first.
-    def stacktrace
-      frames = @event.raised&.frames || []
-      app_frames = frames.select(&:in_app?)
-      (app_frames.empty? ? frames : app_frames).reverse.first(MAX_FRAMES)
-    end
-
     def stacktrace_section
-      frames = stacktrace
+      frames = (@event.raised&.app_frames || []).reverse.first(MAX_FRAMES) # crash site first
       return if frames.empty?
 
       out = ["## Stack trace", "```"]

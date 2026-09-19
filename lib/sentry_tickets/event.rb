@@ -41,28 +41,15 @@ module SentryTickets
     # every such event would collide on the digest of the empty fingerprint.
     def reportable? = !raised.nil? || !message.to_s.strip.empty?
 
-    # Sentry groups events by fingerprint. Events produced by the SDK almost
-    # never carry one (it defaults to an empty array, meaning "derive it"), so
-    # we derive one ourselves. Deliberately excludes tags: sentry-rack adds a
-    # per-request request_id tag, which would shatter grouping into one issue
-    # per request.
+    # One bug, one ticket. An explicit fingerprint set in the app wins;
+    # otherwise the raised exception's type plus where it happened in app
+    # code. Line numbers shift with unrelated edits and messages carry ids and
+    # object addresses (Ruby 3.2's NoMethodError embeds "#<User:0x... @id=5>"),
+    # so neither is part of the key: the message stands in only when there is
+    # no stack trace. Tags stay out too, since sentry-rack's per-request
+    # request_id would give every request its own ticket.
     def fingerprint
-      explicit = @data["fingerprint"]
-      return Digest::SHA256.hexdigest(explicit.join("|")) if explicit.is_a?(Array) && !explicit.empty?
-
-      parts = []
-      if raised
-        parts << raised.type
-        # The message keeps distinct failures distinct even when they share
-        # type and raise site, e.g. `send(method_name)` missing different
-        # methods on one line.
-        parts << raised.first_line.chomp
-        raised.frames.last(10).each do |f|
-          parts << [f.module_name, f.function, f.filename, f.lineno].join(",")
-        end
-      end
-      parts << message if message
-      Digest::SHA256.hexdigest(parts.join("\u0000"))
+      Digest::SHA256.hexdigest(grouping_key.join("\u0000"))
     end
 
     def title
@@ -99,6 +86,13 @@ module SentryTickets
         return [] unless stacktrace.is_a?(Hash)
 
         Array(stacktrace["frames"]).grep(Hash).map { |f| Frame.new(f) }
+      end
+
+      # The frames that say where the app went wrong: the ones the SDK marked
+      # in-app, or all of them when it marked none.
+      def app_frames
+        in_app = frames.select(&:in_app?)
+        in_app.empty? ? frames : in_app
       end
     end
 
@@ -138,6 +132,17 @@ module SentryTickets
     end
 
     private
+
+    def grouping_key
+      explicit = @data["fingerprint"]
+      return explicit.map(&:to_s) if explicit.is_a?(Array) && !explicit.empty?
+      return [message.to_s] unless raised
+
+      frames = raised.app_frames
+      return [raised.type, raised.first_line.chomp] if frames.empty?
+
+      [raised.type, *frames.map { |f| "#{f.filename}:#{f.label}" }]
+    end
 
     def hash_at(key)
       value = @data[key]

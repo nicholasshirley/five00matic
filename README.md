@@ -99,9 +99,12 @@ Notes:
 ## Behavior
 
 - **Fingerprint** (dedup key): an explicit non-empty `event["fingerprint"]`
-  wins; otherwise derived from the raised exception's type + its 10 most
-  recent stack frames + message. Volatile data (tags, request ids) is
-  deliberately excluded so one bug is one ticket even across requests.
+  wins; otherwise the raised exception's type + the file and function of
+  each in-app stack frame (every frame, when the SDK marked none in-app).
+  Line numbers, messages and tags are deliberately left out: they vary
+  between occurrences of one bug (a deploy shifts lines; messages carry ids
+  and, on Ruby 3.2, object addresses; tags carry request ids). The message
+  is used only for an exception with no stack trace, or a message event.
 - **First occurrence** of a fingerprint: an issue is opened immediately
   (count is 1).
 - **Recurrences**: count increments on every event, but a GitHub notification
@@ -136,7 +139,8 @@ Notes:
   read or header timeouts, no chunked-encoding or request-size limits. A
   slow client can hold a thread open; a hostile one can hold many. For
   anything but local use, run `config.ru` behind a real app server instead.
-- Fingerprinting is intentionally simple; Sentry's own is deeper (normalized
-  frames, in_app heuristics, user-supplied fingerprint arrays are honored).
+- Fingerprinting approximates Sentry's: two raises of one exception type in
+  the same method share a ticket, and `{{ default }}` in an explicit
+  fingerprint is taken literally rather than expanded.
 - No authentication on the receiver endpoint itself; put it behind your
   normal internal-network/secret controls.
