@@ -27,7 +27,7 @@ module SentryTickets
     def ingest(event, project = "default", now: Time.now)
       fp = self.class.fingerprint(event)
       @mutex.synchronize do
-        now = Time.utc(*now.to_a)
+        now = now.getutc
         rec = @state[fp] || new_record(fp, project, now).tap { |r| @state[fp] = r }
         action = rec["issue_pending"] ? (notice_due?(rec, now) ? :commented : :suppressed) : :opened
         rec["count"] += 1
@@ -46,7 +46,7 @@ module SentryTickets
     # Marks a delivery as successful. last_notice_at / last_notice_count anchor
     # the next throttle window and the "N new occurrences" count.
     def record_delivered(fp, number: nil, url: nil, outbox: nil, at: Time.now)
-      at = Time.utc(*at.to_a)
+      at = at.getutc
       @mutex.synchronize do
         rec = @state[fp]
         return if rec.nil?
@@ -97,6 +97,11 @@ module SentryTickets
       if values.is_a?(Array) && !values.empty?
         v = values.last
         parts << v["type"].to_s
+        # The message (first line of the SDK "value" field, which carries
+        # detailed_message with backtrace lines beneath it) keeps distinct
+        # failures distinct even when they share type and raise site, e.g.
+        # `send(method_name)` missing different methods on one line.
+        parts << v["value"].to_s.lines.first.to_s.chomp
         frames = v.dig("stacktrace", "frames")
         if frames.is_a?(Array)
           frames.last(10).each do |f|
@@ -117,10 +122,11 @@ module SentryTickets
         if values.is_a?(Array) && !values.empty?
           exception_line(values.last)
         else
-          (event["message"] || "<no message>").lines.first.to_s
+          (event["message"] || "<no message>").to_s.lines.first.to_s
         end
       title = title.gsub(/[[:space:]]+/, " ").strip
-      title.length > 100 ? "#{title[0..97]}..." : title
+      title = "<no message>" if title.empty?
+      title.length > 100 ? "#{title[0, 97]}..." : title
     end
 
     # "Type: message" for the exception, tolerating values that already carry

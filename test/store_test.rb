@@ -31,6 +31,21 @@ class StoreTest < Minitest::Test
     refute_equal SentryTickets::Store.fingerprint(a), SentryTickets::Store.fingerprint(c)
   end
 
+  def test_fingerprint_distinguishes_values_at_same_raise_site
+    a = Fixture.event
+    b = Fixture.event(value: "undefined method `age' for nil:NilClass")
+    refute_equal SentryTickets::Store.fingerprint(a), SentryTickets::Store.fingerprint(b),
+                 "different exception messages on the same frames are different errors"
+  end
+
+  def test_fingerprint_ignores_backtrace_lines_in_value
+    # The SDK value field carries detailed_message: message first, then
+    # embedded backtrace lines. Only the message may split the fingerprint.
+    a = Fixture.event
+    b = Fixture.event(value: "undefined method `name' for nil:NilClass\n\n  from /app/lib/orders.rb:26")
+    assert_equal SentryTickets::Store.fingerprint(a), SentryTickets::Store.fingerprint(b)
+  end
+
   def test_first_event_opens_and_counts
     store = Fixture.store
     action, rec, = store.ingest(Fixture.event, now: T0)
@@ -59,6 +74,26 @@ class StoreTest < Minitest::Test
     action, rec, = store.ingest(Fixture.event, now: T0 + 21_601)
     assert_equal :commented, action
     assert_equal 2, rec["count"]
+  end
+
+  def test_local_time_is_stored_as_same_utc_instant
+    store = Fixture.store
+    local = Time.new(2026, 9, 19, 5, 0, 0, "-07:00")
+    _, rec, = store.ingest(Fixture.event, now: local)
+    assert_equal local.getutc.iso8601, rec["first_seen"],
+                 "wall-clock components must not be reinterpreted as UTC"
+  end
+
+  def test_local_delivery_time_anchors_notice_window_by_instant
+    store = Fixture.store(Fixture.store_dir, 3600)
+    fp = SentryTickets::Store.fingerprint(Fixture.event)
+    store.ingest(Fixture.event, now: Time.utc(2026, 9, 19, 12))
+    store.record_delivered(fp, number: 7, at: Time.new(2026, 9, 19, 5, 0, 0, "-07:00"))
+
+    action, = store.ingest(Fixture.event, now: Time.utc(2026, 9, 19, 12, 0, 30))
+    assert_equal :suppressed, action
+    action, = store.ingest(Fixture.event, now: Time.utc(2026, 9, 19, 13, 0, 1))
+    assert_equal :commented, action
   end
 
   def test_delivery_success_anchors_notice_window
@@ -102,5 +137,27 @@ class StoreTest < Minitest::Test
   def test_title_for_exception_event
     assert_equal "NoMethodError: undefined method `name' for nil:NilClass",
                  SentryTickets::Store.title_for(Fixture.event)
+  end
+
+  def test_title_for_exception_value_with_type_prefix
+    event = Fixture.event(value: "NoMethodError: already prefixed")
+    assert_equal "NoMethodError: already prefixed", SentryTickets::Store.title_for(event)
+  end
+
+  def test_title_for_message_event
+    assert_equal "hello there", SentryTickets::Store.title_for("message" => "hello there\nmore")
+  end
+
+  def test_title_falls_back_when_message_empty_or_missing
+    assert_equal "<no message>", SentryTickets::Store.title_for("message" => "")
+    assert_equal "<no message>", SentryTickets::Store.title_for("event_id" => "x")
+    assert_equal "<no message>", SentryTickets::Store.title_for("message" => nil)
+  end
+
+  def test_title_truncates_long_messages
+    long = "x" * 200
+    title = SentryTickets::Store.title_for("message" => long)
+    assert_equal 100, title.length
+    assert title.end_with?("...")
   end
 end
