@@ -1,0 +1,4 @@
+data/
+sample/
+*.gem
+.byebug_history
