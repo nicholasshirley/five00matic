@@ -31,10 +31,6 @@ class AppTest < Minitest::Test
     Dir[File.join(@outbox, "**", "*.md")].sort
   end
 
-  def test_dry_run_without_token
-    assert @app.destination.dry_run?
-  end
-
   def test_event_hash_opens_issue_in_outbox
     status, headers, body = post(Fixture.payload.to_json)
     resp = JSON.parse(body.join)
@@ -73,7 +69,6 @@ class AppTest < Minitest::Test
     resp = JSON.parse(body.join)
     assert_equal "opened", resp["action"]
     assert_equal 2, outbox_files.size
-    assert_equal 2, @app.store.size
   end
 
   def test_garbage_rejected

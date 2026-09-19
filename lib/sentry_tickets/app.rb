@@ -9,13 +9,11 @@ module SentryTickets
   class App
     InvalidPayload = Class.new(StandardError)
 
-    def initialize(config, store: nil, destination: nil)
-      @store = store || Store.new(config.data_dir)
-      @destination = destination || destination_for(config)
+    def initialize(config)
+      @store = Store.new(config.data_dir)
+      @destination = destination_for(config)
       @tracker = Tracker.new(store: @store, destination: @destination, notice_interval: config.notice_interval)
     end
-
-    attr_reader :store, :destination
 
     def call(env)
       case [env["REQUEST_METHOD"], env["PATH_INFO"]]
