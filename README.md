@@ -98,6 +98,10 @@ Notes:
 - **Delivery failures** are recorded on the fingerprint and retried on the
   next occurrence (the count was already persisted, so no event is lost); the
   HTTP response still reports 200 because the sender has handed off ownership.
+- **Ticket size**: GitHub rejects issue bodies over 65,536 characters, so
+  rendered tickets are capped below that. The raw-payload section switches to
+  compact JSON and is clipped first; only an event whose structured sections
+  alone overflow gets those clipped too.
 - **State** is a single JSON file written atomically; restarts and
   redeploys keep counts and throttle anchors. For a real deployment behind a
   load balancer, put state on shared storage or keep a single instance.

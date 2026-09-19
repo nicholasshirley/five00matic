@@ -104,4 +104,23 @@ class TicketTest < Minitest::Test
     assert_includes body, "```json\n"
     assert_includes body, "\n```\n\n</details>"
   end
+
+  def test_body_fits_github_issue_limit_when_payload_is_huge
+    # GitHub rejects issue bodies over 65,536 characters; one fat event must
+    # not make the ticket permanently undeliverable.
+    event = Fixture.event.merge("extra" => { "blob" => "x" * 200_000 })
+    body = SentryTickets::Ticket.new(event, @rec).body
+    assert_operator body.length, :<=, SentryTickets::Ticket::MAX_BODY_CHARS
+    assert_includes body, "## Summary"
+    assert_includes body, "*(payload truncated to fit GitHub issue size limits)*"
+    assert body.end_with?("</details>"), "details block must stay closed"
+  end
+
+  def test_body_clips_when_structured_sections_alone_overflow
+    tags = 200.times.map { |i| ["tag_#{i}", "v" * 450] }.to_h
+    event = Fixture.event.merge("tags" => tags)
+    body = SentryTickets::Ticket.new(event, @rec).body
+    assert_operator body.length, :<=, SentryTickets::Ticket::MAX_BODY_CHARS
+    assert_includes body, "*(sections truncated to fit GitHub issue size limits)*"
+  end
 end
