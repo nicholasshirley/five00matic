@@ -74,7 +74,9 @@ module SentryTickets
     end
 
     def all
-      @state.values.sort_by { |r| self.class.sort_time(r["last_seen"]) }.reverse
+      @mutex.synchronize do
+        @state.values.sort_by { |r| self.class.sort_time(r["last_seen"]) }.reverse
+      end
     end
 
     # iso8601 strings only sort lexicographically within one precision:
@@ -86,7 +88,7 @@ module SentryTickets
     end
 
     def tracked
-      @state.size
+      @mutex.synchronize { @state.size }
     end
 
     # Sentry groups events by fingerprint. Events produced by the SDK almost
