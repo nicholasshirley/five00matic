@@ -50,19 +50,6 @@ class ServeTest < Minitest::Test
     assert_equal SentryTickets::VERSION, health["version"]
   end
 
-  def test_envelope_delivered_with_dsn_project
-    event = Fixture.event
-    wire = [
-      JSON.generate("event_id" => event["event_id"], "dsn" => "https://k@my-host.local/7",
-                    "sent_at" => "2026-09-19T12:00:00Z"),
-      JSON.generate("type" => "event"),
-      event.to_json
-    ].join("\n")
-    res = http_post(wire)
-    assert_equal 200, res.code.to_i
-    assert_equal "7", JSON.parse(res.body)["project"]
-  end
-
   def test_garbage_is_400
     res = http_post("not json at all")
     assert_equal 400, res.code.to_i

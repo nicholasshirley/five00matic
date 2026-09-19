@@ -174,31 +174,6 @@ class AppTest < Minitest::Test
     assert @app.store.tracked == 2
   end
 
-  def test_envelope_payload
-    event = Fixture.event
-    project_id = "7"
-    header = { "event_id" => event["event_id"], "dsn" => "https://k@my-host.local/#{project_id}",
-               "sent_at" => "2026-09-19T12:00:00Z", "sdk" => "sentry.ruby" }
-    item_header = { "type" => "event", "content_type" => "application/json" }
-    # plus a session item that must be ignored
-    wire = [JSON.generate(header), JSON.generate(item_header), event.to_json,
-            JSON.generate("type" => "session"), JSON.generate("seq" => 1)].join("\n")
-
-    status, _, body = post(wire)
-    resp = JSON.parse(body.join)
-    assert_equal 200, status
-    assert_equal "opened", resp["action"]
-    assert_equal project_id, resp["project"], "project comes from the DSN in the envelope header"
-    assert_equal 1, outbox_files.size
-  end
-
-  def test_envelope_only_with_sessions_is_rejected
-    header = { "event_id" => "x", "sent_at" => "2026-09-19T12:00:00Z" }
-    wire = [JSON.generate(header), JSON.generate("type" => "session"), JSON.generate("seq" => 1)].join("\n")
-    status, = post(wire)
-    assert_equal 400, status
-  end
-
   def test_garbage_rejected
     status, _, body = post("not json at all")
     assert_equal 400, status
@@ -252,45 +227,10 @@ class AppTest < Minitest::Test
     assert_includes outbox, "caf\uFFFD", "invalid key bytes must be replaced, not crash or leak raw"
   end
 
-  def test_envelope_event_without_signal_is_rejected
-    header = { "event_id" => "x", "sent_at" => "2026-09-19T12:00:00Z" }
-    wire = [JSON.generate(header), JSON.generate("type" => "event"), { "event_id" => "x" }.to_json].join("\n")
-    status, _, body = post(wire)
-    assert_equal 400, status
-    assert_equal "event has no exception or message", JSON.parse(body.join)["error"]
-  end
-
   def test_unknown_route_is_404
     status, _, body = get("/nope")
     assert_equal 404, status
     assert_equal "not found", JSON.parse(body.join)["error"]
-  end
-
-  def test_gzip_event_hash_is_accepted
-    gz = Zlib.gzip(Fixture.event.to_json)
-    status, _, body = post(gz)
-    assert_equal 200, status
-    assert_equal "opened", JSON.parse(body.join)["action"]
-  end
-
-  def test_gzip_envelope_is_accepted
-    event = Fixture.event
-    header = { "event_id" => event["event_id"], "dsn" => "https://k@my-host.local/7",
-               "sent_at" => "2026-09-19T12:00:00Z" }
-    item_header = { "type" => "event", "content_type" => "application/json" }
-    wire = [JSON.generate(header), JSON.generate(item_header), event.to_json].join("\n")
-
-    status, _, body = post(Zlib.gzip(wire))
-    resp = JSON.parse(body.join)
-    assert_equal 200, status
-    assert_equal "opened", resp["action"]
-    assert_equal "7", resp["project"]
-  end
-
-  def test_invalid_gzip_is_rejected_not_500
-    status, _, body = post("\x1F\x8B".b + "not really gzip")
-    assert_equal 400, status
-    assert_includes JSON.parse(body.join)["error"], "unrecognized"
   end
 
   def test_escaped_unicode_in_json_payload_is_accepted
@@ -459,25 +399,6 @@ class AppTest < Minitest::Test
     issues = JSON.parse(body.join)
     assert_equal 1, issues.size
     assert_equal "NoMethodError: undefined method `name' for nil:NilClass", issues.first["title"]
-  end
-
-  def test_project_header_on_raw_hash
-    _, _, body = post(Fixture.event.to_json, { "HTTP_X_SENTRY_PROJECT" => "42" })
-    resp = JSON.parse(body.join)
-    assert_equal "42", resp["project"]
-  end
-
-  def test_project_header_with_invalid_bytes_is_scrubbed_not_wedging_state
-    status, _, body = post(Fixture.event.to_json, { "HTTP_X_SENTRY_PROJECT" => "bad\xFFproj".b })
-    assert_equal 200, status
-    assert_equal "bad�proj", JSON.parse(body.join)["project"]
-
-    # the poisoned project string used to raise JSON::GeneratorError on
-    # every subsequent persist, so a second, distinct event must still work
-    status, _, body = post(Fixture.event(id: "e2", type: "RuntimeError", value: "other").to_json)
-    assert_equal 200, status
-    assert_equal "opened", JSON.parse(body.join)["action"]
-    assert_equal 2, @app.store.tracked
   end
 
   def test_delivery_error_with_binary_message_is_scrubbed_not_wedging_state

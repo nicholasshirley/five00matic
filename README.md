@@ -1,11 +1,10 @@
 # sentry_experiment
 
 A prototype error-ticket receiver: it accepts the error event that
-sentry-ruby has fully assembled (via a `before_send` hook, or a raw Sentry
-envelope POST) and turns each unique error into a well-formatted GitHub
-issue ticket, with throttled recurrence notices. No dependency on Sentry's
-servers and no dependency on any gem beyond the Ruby stdlib (+ rack
-compatibility for mounting).
+sentry-ruby has fully assembled (via a `before_send` hook) and turns each
+unique error into a well-formatted GitHub issue ticket, with throttled
+recurrence notices. No dependency on Sentry's servers and no dependency on
+any gem beyond the Ruby stdlib (+ rack compatibility for mounting).
 
 Built against the payload shape of sentry-ruby 5.10 / sentry-rails 5.10 as
 installed under RVM Ruby 3.2.0, but the code runs on plain modern Ruby
@@ -54,8 +53,7 @@ GEM_HOME=$HOME/.rvm/gems/ruby-3.2.0 \
 GEM_PATH=$HOME/.rvm/gems/ruby-3.2.0:$HOME/.rvm/rubies/ruby-3.2.0/lib/ruby/gems/3.2.0 \
 $HOME/.rvm/rubies/ruby-3.2.0/bin/ruby scripts/make_sample_event.rb
 
-curl -s -X POST --data-binary @sample/event.json   http://127.0.0.1:9292/events
-curl -s -X POST --data-binary @sample/envelope.txt http://127.0.0.1:9292/events
+curl -s -X POST --data-binary @sample/event.json http://127.0.0.1:9292/events
 ```
 
 ## Wiring an existing app
@@ -91,8 +89,9 @@ Notes:
 - The hook already runs on a background worker thread in the SDK; the POST is
   the only added latency. Keep it small, or queue it if your app also has a
   job system.
-- The receiver accepts the same event as a Sentry envelope too (a DSN pointed
-  at it would work: it reads the project id from the envelope's DSN header).
+- `before_send` is the only intake. Don't point `SENTRY_DSN` at the receiver:
+  the SDK would post envelopes to `/api/<project>/envelope/`, which it does
+  not serve.
 - The event hash the hook receives is exactly what this receiver stores and
   renders, including the full raw payload at the bottom of the ticket.
 
@@ -138,6 +137,5 @@ Notes:
   anything but local use, run `config.ru` behind a real app server instead.
 - Fingerprinting is intentionally simple; Sentry's own is deeper (normalized
   frames, in_app heuristics, user-supplied fingerprint arrays are honored).
-- Gzip'd envelopes are accepted (the SDK gzips payloads >= 30KB).
 - No authentication on the receiver endpoint itself; put it behind your
   normal internal-network/secret controls.

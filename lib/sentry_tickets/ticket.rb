@@ -42,7 +42,6 @@ module SentryTickets
 
     def summary_section
       lines = ["## Summary", ""]
-      lines << "- **Project:** #{val(@record['project'])}" if @record["project"]
       lines << "- **Environment:** #{val(@event['environment'])}" if @event["environment"]
       lines << "- **Release:** #{val(@event['release'])}" if @event["release"]
       lines << "- **Server:** #{val(@event['server_name'])}" if @event["server_name"]

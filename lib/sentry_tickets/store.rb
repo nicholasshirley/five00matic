@@ -24,18 +24,16 @@ module SentryTickets
     end
 
     # Returns [action, record, event].
-    def ingest(event, project = "default", now: Time.now)
+    def ingest(event, now: Time.now)
       fp = self.class.fingerprint(event)
       @mutex.synchronize do
         now = now.getutc
-        rec = @state[fp] || new_record(fp, project, now).tap { |r| @state[fp] = r }
+        rec = @state[fp] || new_record(fp, now).tap { |r| @state[fp] = r }
         action = rec["issue_pending"] ? (notice_due?(rec, now) ? :commented : :suppressed) : :opened
         rec["count"] += 1
         rec["last_seen"] = now.iso8601
         rec["last_event_id"] = event["event_id"]
         rec["title"] = self.class.title_for(event)
-        # project comes from the DSN and is stable per app; the first event's
-        # value is kept for the record's lifetime
         rec["release"] = event["release"] if event["release"]
         rec["environment"] = event["environment"] if event["environment"]
         persist!
@@ -152,10 +150,9 @@ module SentryTickets
 
     private
 
-    def new_record(fp, project, now)
+    def new_record(fp, now)
       {
         "fingerprint" => fp,
-        "project" => project,
         "count" => 0,
         "title" => nil,
         "release" => nil,

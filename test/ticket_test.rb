@@ -26,7 +26,6 @@ class TicketTest < Minitest::Test
 
   def test_summary_fields
     body = @ticket.body
-    assert_includes body, "**Project:** default"
     assert_includes body, "**Environment:** production"
     assert_includes body, "**Release:** 1.2.3"
     assert_includes body, "**Server:** web1.example.com"

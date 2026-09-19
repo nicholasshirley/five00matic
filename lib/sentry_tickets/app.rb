@@ -1,16 +1,12 @@
 # frozen_string_literal: true
 
 require "json"
-require "stringio"
-require "uri"
-require "zlib"
 
 module SentryTickets
-  # The deliverable: POST /events accepts either a raw event hash (what a
-  # before_send hook has) or a raw Sentry envelope (what a DSN pointed here
-  # would POST), and answers with what happened to it.
+  # The deliverable: POST /events accepts the event hash a before_send hook
+  # has, and answers with what happened to it.
   class App
-    BAD_PAYLOAD_ERROR = "unrecognized payload (expected event JSON or Sentry envelope)"
+    BAD_PAYLOAD_ERROR = "unrecognized payload (expected Sentry event JSON)"
     NO_SIGNAL_ERROR = "event has no exception or message"
 
     def initialize(config, store: nil, github: nil)
@@ -51,17 +47,16 @@ module SentryTickets
     private
 
     def handle_events(env)
-      event, project, error = extract_event(env)
+      event, error = extract_event(env)
       return json({ error: error }, status: 400) if event.nil?
 
       lock_for(Store.fingerprint(event)).synchronize do
-        action, rec, ev = @store.ingest(event, project)
+        action, rec, ev = @store.ingest(event)
         action = deliver(action, rec, ev)
         json({
           action: action.to_s,
           count: rec["count"],
           fingerprint: rec["fingerprint"],
-          project: rec["project"],
           first_seen: rec["first_seen"],
           last_seen: rec["last_seen"],
           issue: rec["issue_url"] || rec["outbox"],
@@ -125,48 +120,27 @@ module SentryTickets
         "- Latest seen: #{rec['last_seen']} (event `#{rec['last_event_id']}`)"
     end
 
-    # Returns [event, project, error]. A nil event carries the reason in
-    # error.
+    # Returns [event, error]. A nil event carries the reason in error.
     def extract_event(env)
       raw = env["rack.input"]
       raw = raw.respond_to?(:read) ? raw.read : raw
       # Rack servers hand over binary bodies, but embedded callers may not;
-      # normalize so encoding-sensitive calls (strip, gzip sniff, JSON.parse)
-      # behave like the deployed path whatever the input's label.
+      # normalize so encoding-sensitive calls (strip, JSON.parse) behave like
+      # the deployed path whatever the input's label.
       body = raw.to_s.b
-      # gzip magic bytes, by value: a String#start_with? sniff raises
-      # Encoding::CompatibilityError when the body is UTF-8-labeled and
-      # carries non-ASCII bytes.
-      if body.getbyte(0) == 0x1F && body.getbyte(1) == 0x8B
-        begin
-          body = Zlib.gunzip(body)
-        rescue Zlib::Error
-          return [nil, nil, BAD_PAYLOAD_ERROR]
-        end
+      return [nil, BAD_PAYLOAD_ERROR] if body.strip.empty?
+
+      begin
+        event = JSON.parse(body)
+      rescue JSON::ParserError
+        return [nil, BAD_PAYLOAD_ERROR]
       end
-      return [nil, nil, BAD_PAYLOAD_ERROR] if body.strip.empty?
+      return [nil, BAD_PAYLOAD_ERROR] unless event.is_a?(Hash)
 
-      event, project = envelope_event(body)
-      if event.nil?
-        begin
-          parsed = JSON.parse(body)
-        rescue JSON::ParserError
-          return [nil, nil, BAD_PAYLOAD_ERROR]
-        end
-        return [nil, nil, BAD_PAYLOAD_ERROR] unless parsed.is_a?(Hash)
-
-        event, project = parsed, (env["HTTP_X_SENTRY_PROJECT"] || "default")
-      end
-
-      # Project is persisted and echoed back, but never passed through
-      # normalize: X-Sentry-Project is a raw header, and an invalid-encoding
-      # byte sequence would raise JSON::GeneratorError on the next persist
-      # and wedge the store.
-      project = scrub_encoding(project)
       event = normalize(event)
-      return [nil, nil, NO_SIGNAL_ERROR] unless error_event?(event)
+      return [nil, NO_SIGNAL_ERROR] unless error_event?(event)
 
-      [event, project]
+      [event, nil]
     end
 
     # JSON.parse trusts the source encoding: a body that is not valid UTF-8
@@ -227,36 +201,6 @@ module SentryTickets
     def error_event?(event)
       return true if event["exception"].is_a?(Hash)
       !event["message"].to_s.strip.empty?
-    end
-
-    # Envelope wire format: headers JSON line, then (item headers JSON line,
-    # item payload JSON line) pairs. Only the first "event"/"error" item
-    # counts; sessions, client reports, transactions and profiles are skipped.
-    def envelope_event(body)
-      lines = body.split("\n")
-      header = JSON.parse(lines[0])
-      return [nil, nil] unless header.is_a?(Hash) && header["event_id"] && (header["dsn"] || header["sent_at"])
-
-      project =
-        if header["dsn"].is_a?(String)
-          begin
-            URI.parse(header["dsn"]).path.split("/").last
-          rescue URI::Error
-            nil
-          end
-        end
-      i = 1
-      while i + 1 < lines.length
-        item_header = JSON.parse(lines[i])
-        if item_header.is_a?(Hash) && %w(event error).include?(item_header["type"])
-          payload = JSON.parse(lines[i + 1])
-          return [payload, project || "default"] if payload.is_a?(Hash)
-        end
-        i += 2
-      end
-      [nil, nil]
-    rescue JSON::ParserError
-      [nil, nil]
     end
 
     def json(payload, status: 200)

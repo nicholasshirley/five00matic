@@ -6,7 +6,6 @@ require "sentry_tickets"
 require "minitest/autorun"
 require "tmpdir"
 require "stringio"
-require "zlib"
 
 module Fixture
   # Sentry-ruby 5.x payload shape after an event.to_json_compatible round

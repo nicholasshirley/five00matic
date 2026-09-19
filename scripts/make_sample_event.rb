@@ -6,11 +6,8 @@
 #
 #   ~/.rvm/rubies/ruby-3.2.0/bin/ruby scripts/make_sample_event.rb
 #
-# Writes:
-#   sample/event.json    raw event hash (what a before_send hook receives,
-#                        via event.to_json_compatible)
-#   sample/envelope.txt  the Sentry envelope that a DSN pointed at this
-#                        receiver would POST (headers line + item lines)
+# Writes sample/event.json: the raw event hash a before_send hook receives,
+# via event.to_json_compatible.
 require "sentry-ruby"
 
 OUT_DIR = File.expand_path("../sample", __dir__)
@@ -47,13 +44,7 @@ scope.apply_to_event(event, {})
 event_hash = event.to_json_compatible
 File.write(File.join(OUT_DIR, "event.json"), JSON.pretty_generate(event_hash) + "\n")
 
-transport = Sentry.get_current_client.transport
-envelope = transport.envelope_from_event(event)
-wire, = transport.serialize_envelope(envelope)
-File.write(File.join(OUT_DIR, "envelope.txt"), wire + "\n")
-
 puts "wrote sample/event.json (#{File.size(File.join(OUT_DIR, 'event.json'))} bytes)"
-puts "wrote sample/envelope.txt (#{File.size(File.join(OUT_DIR, 'envelope.txt'))} bytes)"
 puts
 puts "exception.values ordering check (last entry must be NoMethodError, the raised exception):"
 event_hash.dig("exception", "values").each do |v|
