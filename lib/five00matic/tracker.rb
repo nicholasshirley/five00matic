@@ -10,25 +10,20 @@ module Five00Matic
       @store = store
       @destination = destination
       @notice_interval = notice_interval
-      # Serializes record -> deliver per fingerprint: without it, two
-      # concurrent first occurrences of one error would both open an issue.
-      @locks = {}
-      @locks_mutex = Mutex.new
     end
 
     # Returns [action, group]: the delivery attempted (:opened, :commented or
-    # :suppressed) and the group as it is afterwards.
+    # :suppressed) and the group as it is afterwards. Record and deliver run
+    # under the fingerprint's lock, held across every process sharing the
+    # store: without it, two concurrent first occurrences of one error would
+    # both open an issue.
     def track(event, now: Time.now)
-      lock_for(event.fingerprint).synchronize do
+      @store.synchronize(event.fingerprint) do
         deliver(@store.record(event, at: now), event, now)
       end
     end
 
     private
-
-    def lock_for(fingerprint)
-      @locks_mutex.synchronize { @locks[fingerprint] ||= Mutex.new }
-    end
 
     # Decided from the group alone, so a group whose last delivery failed, or
     # whose issue the destination does not hold (filed in dry-run, say), gets

@@ -42,6 +42,15 @@ class SlowGitHub < FakeGitHub
   end
 end
 
+# An outbox whose opens take long enough for sibling processes to pile up
+# inside them.
+class SlowOutbox < Five00Matic::Outbox
+  def open_issue(title:, body:)
+    sleep 0.2
+    super
+  end
+end
+
 # Opens fine; every comment 502s.
 class BadCommentGitHub < FakeGitHub
   def comment(issue, body:) = raise(Five00Matic::DeliveryError.new("GitHub API 502: boom", status: 502))
@@ -155,6 +164,23 @@ class TrackerTest < Minitest::Test
     assert_equal 5, store.groups.first.count
     assert_equal 1, github.opens.size, "concurrent first occurrences must open exactly one issue"
     assert_empty github.comments
+  end
+
+  def test_first_occurrences_in_separate_processes_open_one_issue
+    dir = Fixture.store_dir
+    outbox = File.join(dir, "outbox")
+    pids = 3.times.map do
+      fork do
+        tracker(SlowOutbox.new(outbox), store: Fixture.store(dir)).track(Fixture.event)
+        exit!(0)
+      end
+    end
+    pids.each { |pid| assert_equal 0, Process.wait2(pid).last.exitstatus }
+
+    files = Dir[File.join(outbox, "*.md")].map { |f| File.basename(f) }
+    assert_equal 1, files.count { |f| f.start_with?("issue-") }, "one issue across processes, got #{files}"
+    assert_equal 2, files.count { |f| f.start_with?("comment-") }, "the later occurrences become notices"
+    assert_equal 3, Fixture.store(dir).groups.first.count
   end
 
   def test_dry_run_state_opens_issue_when_delivery_becomes_real

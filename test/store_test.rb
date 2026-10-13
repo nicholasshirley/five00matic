@@ -40,6 +40,28 @@ class StoreTest < Minitest::Test
     assert_equal store.groups.first, reloaded.groups.first
   end
 
+  def test_instances_sharing_a_directory_see_each_others_writes
+    dir = Fixture.store_dir
+    a = Fixture.store(dir)
+    b = Fixture.store(dir)
+    a.record(Fixture.event, at: T0)
+    assert_equal 2, b.record(Fixture.event, at: T0 + 1).count, "b counts on top of a's record, not a stale copy"
+    assert_equal 1, a.size
+  end
+
+  def test_records_from_separate_processes_are_all_counted
+    dir = Fixture.store_dir
+    pids = 4.times.map do
+      fork do
+        store = Fixture.store(dir)
+        25.times { store.record(Fixture.event, at: T0) }
+        exit!(0)
+      end
+    end
+    pids.each { |pid| assert_equal 0, Process.wait2(pid).last.exitstatus }
+    assert_equal 100, Fixture.store(dir).groups.first.count
+  end
+
   def test_file_is_owner_readable_only
     dir = Fixture.store_dir
     Fixture.store(dir).record(Fixture.event, at: T0)

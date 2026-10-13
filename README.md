@@ -134,11 +134,13 @@ Notes:
   rendered tickets are capped below that. The raw-payload section switches to
   compact JSON and is clipped first; only an event whose structured sections
   alone overflow gets those clipped too.
-- **State** is a single JSON file (`data/groups.json`) written atomically;
+- **State** is a single JSON file (`data/groups.json`), read and written
+  under a file lock, so every process sharing the directory (a web server
+  and the job workers it forked, say) counts against one set of groups;
   restarts and redeploys keep counts and throttle anchors. State and outbox
   files carry event content (user ids, request bodies) and are written
-  owner-only (0600). For a real deployment behind a load balancer, put state
-  on shared storage or keep a single instance.
+  owner-only (0600). Hosts cannot share a data directory: run one host, or
+  one receiver that every host posts to.
 
 ## Known simplifications (prototype scope)
 
@@ -146,9 +148,9 @@ Notes:
 - Delivery is at-least-once: if GitHub times out after creating an issue but
   before the response arrives, the retry opens a duplicate issue. Issue
   creation has no idempotency key.
-- Single-node state file; not multi-process safe. Within one process the
-  record-to-delivery path is serialized per fingerprint, so a single
-  instance will not double-open an issue.
+- Single-host state file. Record-to-delivery is serialized per fingerprint
+  across the processes of one host, so they will not double-open an issue;
+  two hosts with their own data directories would.
 - `bin/serve.rb` is a convenience, not a server: thread-per-connection, no
   read or header timeouts, no chunked-encoding or request-size limits. A
   slow client can hold a thread open; a hostile one can hold many. For
