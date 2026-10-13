@@ -8,25 +8,27 @@ class GitHubTest < Minitest::Test
     SentryTickets::GitHub.new(repo: "you/repo", token: "t", labels: ["error-report"], api_base: api_base)
   end
 
-  # Serves one canned HTTP response, and yields the API base to point at it.
+  # Serves one canned HTTP response, and yields the API base to point at it
+  # with the requests received so far, each [method, path, headers, body].
   def answering(status_line, body)
     server = TCPServer.new("127.0.0.1", 0)
+    requests = []
     thread = Thread.new do
       sock = server.accept
-      sock.gets
-      length = 0
+      method, path, = sock.gets.split
+      headers = {}
       while (line = sock.gets) != "\r\n"
         name, value = line.split(":", 2)
-        length = value.to_i if name.casecmp?("content-length")
+        headers[name.downcase] = value.strip
       end
       # Read the whole request: closing with it unread resets the connection.
-      sock.read(length)
+      requests << [method, path, headers, sock.read(headers["content-length"].to_i)]
       sock.write "HTTP/1.1 #{status_line}\r\nContent-Type: application/json\r\n" \
                  "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n"
       sock.write body
       sock.close
     end
-    yield "http://127.0.0.1:#{server.addr[1]}"
+    yield "http://127.0.0.1:#{server.addr[1]}", requests
   ensure
     thread.join
     server.close
@@ -44,6 +46,44 @@ class GitHubTest < Minitest::Test
   def test_comment_on_a_missing_issue_raises_issue_gone
     answering("404 Not Found", '{"message":"Not Found"}') do |api_base|
       assert_raises(SentryTickets::IssueGone) { github(api_base).comment({ "number" => 7 }, body: "b") }
+    end
+  end
+
+  def test_open_issue_posts_the_issue_and_returns_where_it_was_filed
+    created = '{"number": 7, "html_url": "https://github.com/you/repo/issues/7"}'
+    answering("201 Created", created) do |api_base, requests|
+      issue = github(api_base).open_issue(title: "t", body: "b")
+      assert_equal({ "repo" => "you/repo", "number" => 7, "url" => "https://github.com/you/repo/issues/7" }, issue,
+                   "owns? and comment read the repo and number back from state")
+
+      method, path, _headers, body = requests.first
+      assert_equal ["POST", "/repos/you/repo/issues"], [method, path]
+      assert_equal({ "title" => "t", "body" => "b", "labels" => ["error-report"] }, JSON.parse(body))
+    end
+  end
+
+  def test_open_issue_without_a_number_in_the_response_raises
+    answering("201 Created", '{"html_url": "https://github.com/you/repo/issues/7"}') do |api_base|
+      error = assert_raises(SentryTickets::DeliveryError) { github(api_base).open_issue(title: "t", body: "b") }
+      assert_equal "GitHub response has no issue number", error.message
+    end
+  end
+
+  def test_comment_posts_the_notice_on_the_issue
+    answering("201 Created", '{"id": 1}') do |api_base, requests|
+      github(api_base).comment({ "repo" => "you/repo", "number" => 7 }, body: "b")
+
+      method, path, _headers, body = requests.first
+      assert_equal ["POST", "/repos/you/repo/issues/7/comments"], [method, path]
+      assert_equal({ "body" => "b" }, JSON.parse(body))
+    end
+  end
+
+  def test_comment_failure_other_than_a_404_is_not_issue_gone
+    answering("502 Bad Gateway", '{"message": "boom"}') do |api_base|
+      error = assert_raises(SentryTickets::DeliveryError) { github(api_base).comment({ "number" => 7 }, body: "b") }
+      refute_kind_of SentryTickets::IssueGone, error, "a transient failure must not drop the issue"
+      assert_equal 502, error.status
     end
   end
 
