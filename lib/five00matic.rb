@@ -22,4 +22,15 @@ require_relative "five00matic/app"
 # before_send hook) and turns each unique error into a GitHub issue, with
 # throttled recurrence notices.
 module Five00Matic
+  # The pipeline a config describes: a store in its data directory feeding
+  # the destination its credentials select, the outbox without any.
+  def self.tracker(config)
+    destination =
+      if config.dry_run?
+        Outbox.new(File.join(config.data_dir, "outbox"))
+      else
+        GitHub.new(repo: config.repo, credentials: config.credentials, labels: config.labels, api_base: config.api_base)
+      end
+    Tracker.new(store: Store.new(config.data_dir), destination: destination, notice_interval: config.notice_interval)
+  end
 end

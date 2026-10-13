@@ -6,6 +6,9 @@ module Five00Matic
   # recurrence notice after that. A failed delivery is kept on the group and
   # retried on the fingerprint's next occurrence.
   class Tracker
+    # The Rack app answers /health and /issues from these.
+    attr_reader :store, :destination
+
     def initialize(store:, destination:, notice_interval:)
       @store = store
       @destination = destination
