@@ -10,9 +10,10 @@ module Five00Matic
   # filter, when given (Rails' ActiveSupport::ParameterFilter built from the
   # app's filter_parameters, or anything that answers filter(hash) with a
   # hash), is applied to the request body and query string, breadcrumb data,
-  # user, tags, extra and contexts. The SDK runs the app's filter over
-  # breadcrumb params only, never over the request body, so without this a
-  # login error would file the password.
+  # user, tags, extra and contexts. The SDK never runs the app's filter over
+  # the request body: through sentry-ruby 6 the body goes out as submitted,
+  # and 7 masks only top-level keys from its own fixed list, so without this
+  # a failed login would file the password.
   class Scrubber
     # sentry-ruby's default rack_env_whitelist. An app that empties it sends
     # the whole Rack env, cookie and credential headers and the raw body

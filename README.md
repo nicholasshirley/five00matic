@@ -100,10 +100,11 @@ Notes:
   Authorization header and the Rack env beyond the SDK's default
   `REMOTE_ADDR`, `SERVER_NAME` and `SERVER_PORT` whatever the settings,
   and runs the app's `filter_parameters` over the request body, the query
-  string, breadcrumb data, user, tags, extra and contexts. The SDK itself
-  applies that filter to breadcrumb params only; the request body goes out
-  as submitted, so a failed login would otherwise file the password.
-  Sentry receives the event unscrubbed, as before.
+  string, breadcrumb data, user, tags, extra and contexts. The SDK never
+  applies that filter to the request body: through sentry-ruby 6 the body
+  goes out as submitted, and 7 masks only top-level keys from its own fixed
+  list, so a failed login would otherwise file the password. Sentry
+  receives the event unscrubbed, as before.
 - Delivery is inline, so the hook answers only as fast as GitHub does. The
   SDK queues 30 events for its worker and drops beyond that.
 - The hook never raises into the SDK.
