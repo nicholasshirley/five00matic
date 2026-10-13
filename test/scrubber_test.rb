@@ -73,6 +73,15 @@ class ScrubberTest < Minitest::Test
                  Five00Matic::Scrubber.new(FakeFilter.new).scrub(payload).dig("request", "query_string")
   end
 
+  # sentry-ruby 7 sends the query parsed, its own masking applied to
+  # top-level keys only.
+  def test_query_sent_as_a_hash_is_filtered
+    payload = request_payload
+    payload["request"]["query_string"] = { "user" => { "password" => "s3cret" }, "page" => "2" }
+    assert_equal({ "user" => { "password" => "[FILTERED]" }, "page" => "2" },
+                 Five00Matic::Scrubber.new(FakeFilter.new).scrub(payload).dig("request", "query_string"))
+  end
+
   def test_json_body_text_is_parsed_for_the_filter_and_other_text_is_kept
     payload = request_payload
     payload["request"]["data"] = '{"password":"p","q":1}'

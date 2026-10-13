@@ -69,11 +69,13 @@ module Five00Matic
       data
     end
 
-    # Filtered pair by pair, so repeated keys and their order survive.
-    # decode_www_form refuses text holding any non-ASCII byte, which a client
-    # that does not percent-encode sends and Puma passes on as it came, so
-    # those bytes are encoded first.
+    # sentry-ruby 7 sends the query parsed into a hash. Earlier versions send
+    # its text, filtered pair by pair so repeated keys and their order
+    # survive. decode_www_form refuses text holding any non-ASCII byte, which
+    # a client that does not percent-encode sends and Puma passes on as it
+    # came, so those bytes are encoded first.
     def filtered_query(query)
+      return filtered(query) if query.is_a?(Hash)
       return query unless query.is_a?(String) && !query.empty?
 
       ascii = query.b.gsub(/[\x80-\xFF]/n) { |byte| format("%%%02X", byte.ord) }
