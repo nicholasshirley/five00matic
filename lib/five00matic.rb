@@ -5,6 +5,7 @@ require "digest/sha2"
 require "time"
 
 require_relative "five00matic/version"
+require_relative "five00matic/credentials"
 require_relative "five00matic/config"
 require_relative "five00matic/event"
 require_relative "five00matic/group"

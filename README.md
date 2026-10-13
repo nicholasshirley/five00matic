@@ -21,6 +21,7 @@ lib/five00matic/store.rb       the groups, persisted (JSON file)
 lib/five00matic/ticket.rb      GitHub-issue markdown rendering
 lib/five00matic/notice.rb      recurrence-notice comment rendering
 lib/five00matic/github.rb      thin GitHub REST client
+lib/five00matic/credentials.rb a token, or a GitHub App minting its own
 lib/five00matic/outbox.rb      dry-run stand-in: tickets as markdown files
 lib/five00matic/tracker.rb     record an occurrence, deliver what GitHub is owed
 lib/five00matic/app.rb         the RACK app (POST /events, GET /health, /issues)
@@ -45,6 +46,9 @@ TICKET_NOTICE_INTERVAL=2 ruby bin/serve.rb      # port 9292, 127.0.0.1
 
 # real delivery: set repo + token and restart
 TICKET_REPO=you/your-repo TICKET_TOKEN=ghp_xxx ruby bin/serve.rb
+
+# or post as a GitHub App (Issues: read and write) instead of with a token
+TICKET_REPO=you/your-repo TICKET_APP_ID=123456 TICKET_APP_KEY_FILE=app.pem ruby bin/serve.rb
 
 # an error filed only to the outbox has no GitHub issue yet; its next
 # occurrence after the switch opens one. Changing TICKET_REPO works the same

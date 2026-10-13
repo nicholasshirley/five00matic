@@ -5,6 +5,8 @@ $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 require "five00matic"
 require "minitest/autorun"
 require "tmpdir"
+require "openssl"
+require "socket"
 require "stringio"
 
 module Fixture
@@ -76,6 +78,40 @@ module Fixture
     c["data"] = data if data
     c
   end
+
+  # Serves canned HTTP responses in order, one connection each, and yields
+  # the API base to point at it with the requests received so far, each
+  # [method, path, headers, body].
+  def self.answering(*responses)
+    server = TCPServer.new("127.0.0.1", 0)
+    requests = []
+    thread = Thread.new do
+      responses.each do |status_line, body|
+        sock = server.accept
+        method, path, = sock.gets.split
+        headers = {}
+        while (line = sock.gets) != "\r\n"
+          name, value = line.split(":", 2)
+          headers[name.downcase] = value.strip
+        end
+        # Read the whole request: closing with it unread resets the connection.
+        requests << [method, path, headers, sock.read(headers["content-length"].to_i)]
+        sock.write "HTTP/1.1 #{status_line}\r\nContent-Type: application/json\r\n" \
+                   "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n"
+        sock.write body
+        sock.close
+      end
+    rescue IOError
+      nil # the listener was closed with responses unused
+    end
+    yield "http://127.0.0.1:#{server.addr[1]}", requests
+  ensure
+    server&.close
+    thread&.join
+  end
+
+  # One key for every test that signs or verifies; generating it is the slow part.
+  def self.private_key = @private_key ||= OpenSSL::PKey::RSA.new(2048)
 
   def self.store_dir
     Dir.mktmpdir("five00matic-test")

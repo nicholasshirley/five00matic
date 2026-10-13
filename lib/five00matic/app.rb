@@ -30,7 +30,7 @@ module Five00Matic
     def destination_for(config)
       return Outbox.new(File.join(config.data_dir, "outbox")) if config.dry_run?
 
-      GitHub.new(repo: config.repo, token: config.token, labels: config.labels, api_base: config.api_base)
+      GitHub.new(repo: config.repo, credentials: config.credentials, labels: config.labels, api_base: config.api_base)
     end
 
     # Delivery runs inline. Its failures are recorded and retried on the next

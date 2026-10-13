@@ -1,35 +1,11 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
-require "socket"
 
 class GitHubTest < Minitest::Test
   def github(api_base)
-    Five00Matic::GitHub.new(repo: "you/repo", token: "t", labels: ["error-report"], api_base: api_base)
-  end
-
-  # Serves one canned HTTP response, and yields the API base to point at it.
-  def answering(status_line, body)
-    server = TCPServer.new("127.0.0.1", 0)
-    thread = Thread.new do
-      sock = server.accept
-      sock.gets
-      length = 0
-      while (line = sock.gets) != "\r\n"
-        name, value = line.split(":", 2)
-        length = value.to_i if name.casecmp?("content-length")
-      end
-      # Read the whole request: closing with it unread resets the connection.
-      sock.read(length)
-      sock.write "HTTP/1.1 #{status_line}\r\nContent-Type: application/json\r\n" \
-                 "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n"
-      sock.write body
-      sock.close
-    end
-    yield "http://127.0.0.1:#{server.addr[1]}"
-  ensure
-    thread.join
-    server.close
+    Five00Matic::GitHub.new(repo: "you/repo", credentials: Five00Matic::Token.new(token: "t"),
+                            labels: ["error-report"], api_base: api_base)
   end
 
   def test_owns_only_issues_opened_in_its_repo
@@ -41,8 +17,21 @@ class GitHubTest < Minitest::Test
     refute github("http://unused").owns?(nil)
   end
 
+  def test_open_issue_posts_with_the_credentials_token
+    created = '{"number": 7, "html_url": "https://github.com/you/repo/issues/7"}'
+    Fixture.answering(["201 Created", created]) do |api_base, requests|
+      issue = github(api_base).open_issue(title: "t", body: "b")
+      assert_equal({ "repo" => "you/repo", "number" => 7, "url" => "https://github.com/you/repo/issues/7" }, issue)
+
+      method, path, headers, body = requests.first
+      assert_equal ["POST", "/repos/you/repo/issues"], [method, path]
+      assert_equal "Bearer t", headers["authorization"]
+      assert_equal({ "title" => "t", "body" => "b", "labels" => ["error-report"] }, JSON.parse(body))
+    end
+  end
+
   def test_comment_on_a_missing_issue_raises_issue_gone
-    answering("404 Not Found", '{"message":"Not Found"}') do |api_base|
+    Fixture.answering(["404 Not Found", '{"message":"Not Found"}']) do |api_base, _requests|
       assert_raises(Five00Matic::IssueGone) { github(api_base).comment({ "number" => 7 }, body: "b") }
     end
   end
@@ -58,7 +47,7 @@ class GitHubTest < Minitest::Test
   # JSON::ParserError message then carries raw bytes, and would otherwise
   # land in state and break every future persist.
   def test_garbage_success_body_wraps_with_valid_utf8_message
-    answering("200 OK", "\xFF\xFEbad!".b) do |api_base|
+    Fixture.answering(["200 OK", "\xFF\xFEbad!".b]) do |api_base, _requests|
       error = assert_raises(Five00Matic::DeliveryError) do
         github(api_base).open_issue(title: "t", body: "b")
       end
@@ -71,6 +60,6 @@ class GitHubTest < Minitest::Test
     # Net::HTTP labels bodies binary; valid multibyte text must survive and
     # invalid bytes must not reach the JSON state file.
     assert_equal "GitHub API 422: café", Five00Matic::DeliveryError.new("GitHub API 422: café".b).message
-    assert_equal "boom: \uFFFD\uFFFD", Five00Matic::DeliveryError.new("boom: \xFF\xFE".b).message
+    assert_equal "boom: ��", Five00Matic::DeliveryError.new("boom: \xFF\xFE".b).message
   end
 end

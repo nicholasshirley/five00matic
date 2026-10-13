@@ -13,9 +13,9 @@ module Five00Matic
     READ_TIMEOUT = 30
     WRITE_TIMEOUT = 30
 
-    def initialize(repo:, token:, labels:, api_base:)
+    def initialize(repo:, credentials:, labels:, api_base:)
       @repo = repo
-      @token = token
+      @credentials = credentials
       @labels = labels
       @api_base = api_base
     end
@@ -44,7 +44,7 @@ module Five00Matic
     private
 
     def post(path, payload)
-      response = send_request(path, JSON.generate(payload))
+      response = send_request(path, JSON.generate(payload), @credentials.token)
       unless response.is_a?(Net::HTTPSuccess)
         raise DeliveryError.new("GitHub API #{response.code}: #{response.body.to_s[0, 300]}",
                                 status: response.code.to_i)
@@ -57,21 +57,21 @@ module Five00Matic
 
     # Refused connections, timeouts, DNS and TLS failures alike become a
     # DeliveryError, to be retried on the next occurrence.
-    def send_request(path, body)
+    def send_request(path, body, token)
       uri = URI("#{@api_base}#{path}")
       Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: OPEN_TIMEOUT,
                                           read_timeout: READ_TIMEOUT, write_timeout: WRITE_TIMEOUT) do |http|
-        http.post(uri.request_uri, body, headers)
+        http.post(uri.request_uri, body, headers(token))
       end
     rescue StandardError => e
       raise DeliveryError, "#{e.class}: #{e.message}"
     end
 
-    def headers
+    def headers(token)
       {
         "Content-Type" => "application/json",
         "Accept" => "application/vnd.github+json",
-        "Authorization" => "Bearer #{@token}",
+        "Authorization" => "Bearer #{token}",
         "X-GitHub-Api-Version" => API_VERSION
       }
     end
