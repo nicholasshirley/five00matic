@@ -1,4 +1,4 @@
-# sentry_experiment
+# five00matic
 
 A prototype error-ticket receiver: it accepts the error event that
 sentry-ruby has fully assembled (via a `before_send` hook) and turns each
@@ -13,17 +13,17 @@ installed under RVM Ruby 3.2.0, but the code runs on plain Ruby 3.2 or newer
 ## Layout
 
 ```
-lib/sentry_tickets.rb          entry point
-lib/sentry_tickets/config.rb   env-driven configuration
-lib/sentry_tickets/event.rb    the SDK payload: fingerprint, title, sections
-lib/sentry_tickets/group.rb    one fingerprint: counts, its issue, notice anchors
-lib/sentry_tickets/store.rb    the groups, persisted (JSON file)
-lib/sentry_tickets/ticket.rb   GitHub-issue markdown rendering
-lib/sentry_tickets/notice.rb   recurrence-notice comment rendering
-lib/sentry_tickets/github.rb   thin GitHub REST client
-lib/sentry_tickets/outbox.rb   dry-run stand-in: tickets as markdown files
-lib/sentry_tickets/tracker.rb  record an occurrence, deliver what GitHub is owed
-lib/sentry_tickets/app.rb      the RACK app (POST /events, GET /health, /issues)
+lib/five00matic.rb             entry point
+lib/five00matic/config.rb      env-driven configuration
+lib/five00matic/event.rb       the SDK payload: fingerprint, title, sections
+lib/five00matic/group.rb       one fingerprint: counts, its issue, notice anchors
+lib/five00matic/store.rb       the groups, persisted (JSON file)
+lib/five00matic/ticket.rb      GitHub-issue markdown rendering
+lib/five00matic/notice.rb      recurrence-notice comment rendering
+lib/five00matic/github.rb      thin GitHub REST client
+lib/five00matic/outbox.rb      dry-run stand-in: tickets as markdown files
+lib/five00matic/tracker.rb     record an occurrence, deliver what GitHub is owed
+lib/five00matic/app.rb         the RACK app (POST /events, GET /health, /issues)
 bin/serve.rb                   zero-dependency standalone server (stdlib TCPServer)
 config.ru                      RACK entry (puma/rackup) for a real deployment, mounted at /sentry
 scripts/make_sample_event.rb   generates a real event using the installed SDK

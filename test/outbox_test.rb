@@ -5,7 +5,7 @@ require_relative "test_helper"
 class OutboxTest < Minitest::Test
   def setup
     @dir = Fixture.store_dir
-    @outbox = SentryTickets::Outbox.new(@dir)
+    @outbox = Five00Matic::Outbox.new(@dir)
   end
 
   def test_open_issue_writes_a_markdown_file
@@ -49,8 +49,8 @@ class OutboxTest < Minitest::Test
   def test_unwritable_directory_wraps_as_delivery_error
     file = File.join(Dir.mktmpdir, "a-file")
     File.write(file, "x")
-    outbox = SentryTickets::Outbox.new(File.join(file, "nope"))
-    error = assert_raises(SentryTickets::DeliveryError) do
+    outbox = Five00Matic::Outbox.new(File.join(file, "nope"))
+    error = assert_raises(Five00Matic::DeliveryError) do
       outbox.open_issue(title: "t", body: "b")
     end
     assert error.message.valid_encoding?
@@ -58,7 +58,7 @@ class OutboxTest < Minitest::Test
 
   def test_slugify
     assert_equal "nomethoderror-undefined-method-name-for-nil-nilclass-nometho",
-                 SentryTickets::Outbox.slugify("NoMethodError: undefined method `name' for nil:NilClass (NoMethodError)")
-    assert_equal "a-b", SentryTickets::Outbox.slugify("  A_B  ")
+                 Five00Matic::Outbox.slugify("NoMethodError: undefined method `name' for nil:NilClass (NoMethodError)")
+    assert_equal "a-b", Five00Matic::Outbox.slugify("  A_B  ")
   end
 end

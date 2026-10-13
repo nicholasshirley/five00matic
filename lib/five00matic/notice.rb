@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module SentryTickets
+module Five00Matic
   # Renders the comment posted on a group's issue when the error recurs.
   class Notice
     def initialize(group)

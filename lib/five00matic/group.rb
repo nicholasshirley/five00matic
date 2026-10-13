@@ -2,7 +2,7 @@
 
 require "time"
 
-module SentryTickets
+module Five00Matic
   # Everything remembered about one fingerprint: how often and when it was
   # seen, the issue it was filed as, and when that issue was last notified.
   # Immutable; each change returns the group as it is afterwards. Times are

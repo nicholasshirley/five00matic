@@ -2,7 +2,7 @@
 
 require "json"
 
-module SentryTickets
+module Five00Matic
   # Renders an event and its group into a GitHub issue body.
   class Ticket
     MAX_FRAMES = 20

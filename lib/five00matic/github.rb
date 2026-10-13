@@ -4,7 +4,7 @@ require "json"
 require "net/http"
 require "uri"
 
-module SentryTickets
+module Five00Matic
   # Files issues and recurrence notices through GitHub's REST API, stdlib
   # only.
   class GitHub

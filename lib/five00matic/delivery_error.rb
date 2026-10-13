@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module SentryTickets
+module Five00Matic
   # A ticket or notice that did not reach its destination. The failure is
   # recorded on the group and delivery is retried on its next occurrence.
   class DeliveryError < StandardError

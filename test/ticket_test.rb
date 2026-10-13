@@ -7,11 +7,11 @@ class TicketTest < Minitest::Test
 
   def setup
     @event = Fixture.event
-    @group = SentryTickets::Group.start(@event.fingerprint, at: T0).record(@event, at: T0)
-    @ticket = SentryTickets::Ticket.new(@event, @group)
+    @group = Five00Matic::Group.start(@event.fingerprint, at: T0).record(@event, at: T0)
+    @ticket = Five00Matic::Ticket.new(@event, @group)
   end
 
-  def ticket(payload, group = @group) = SentryTickets::Ticket.new(SentryTickets::Event.new(payload), group)
+  def ticket(payload, group = @group) = Five00Matic::Ticket.new(Five00Matic::Event.new(payload), group)
 
   def test_body_has_core_sections
     body = @ticket.body
@@ -159,7 +159,7 @@ class TicketTest < Minitest::Test
     # not make the ticket permanently undeliverable.
     event = Fixture.payload.merge("extra" => { "blob" => "x" * 200_000 })
     body = ticket(event).body
-    assert_operator body.length, :<=, SentryTickets::Ticket::MAX_BODY_CHARS
+    assert_operator body.length, :<=, Five00Matic::Ticket::MAX_BODY_CHARS
     assert_includes body, "## Summary"
     assert_includes body, "*(payload truncated to fit GitHub issue size limits)*"
     assert body.end_with?("</details>"), "details block must stay closed"
@@ -169,7 +169,7 @@ class TicketTest < Minitest::Test
     tags = 200.times.map { |i| ["tag_#{i}", "v" * 450] }.to_h
     event = Fixture.payload.merge("tags" => tags)
     body = ticket(event).body
-    assert_operator body.length, :<=, SentryTickets::Ticket::MAX_BODY_CHARS
+    assert_operator body.length, :<=, Five00Matic::Ticket::MAX_BODY_CHARS
     assert_includes body, "*(sections truncated to fit GitHub issue size limits)*"
   end
 end

@@ -4,11 +4,11 @@
 # Standalone bootstrap with no gem dependencies beyond stdlib + rack:
 #   ruby bin/serve.rb
 # Honors TICKET_HOST (default 127.0.0.1) and TICKET_PORT (default 9292),
-# plus all SentryTickets::Config env vars. For mounting into an existing
+# plus all Five00Matic::Config env vars. For mounting into an existing
 # Ruby app instead, use the App object directly via config.ru.
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 
-require "sentry_tickets"
+require "five00matic"
 require "socket"
 require "stringio"
 
@@ -56,7 +56,7 @@ def serve(client, app)
   client.write "Connection: close\r\n\r\n"
   client.write out
 rescue StandardError => e
-  warn "[sentry-tickets] request error: #{e.class}: #{e.message}"
+  warn "[five00matic] request error: #{e.class}: #{e.message}"
   begin
     client.write "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
   rescue StandardError
@@ -64,13 +64,13 @@ rescue StandardError => e
   end
 end
 
-config = SentryTickets::Config.new
-app = SentryTickets::App.new(config)
+config = Five00Matic::Config.new
+app = Five00Matic::App.new(config)
 
 # Bind first so the "listening" line never precedes a failed bind.
 server = TCPServer.new(ENV.fetch("TICKET_HOST", "127.0.0.1"), ENV.fetch("TICKET_PORT", "9292").to_i)
 
-$stderr.puts "[sentry-tickets] listening on http://#{ENV.fetch("TICKET_HOST", "127.0.0.1")}:#{ENV.fetch("TICKET_PORT", "9292")} " \
+$stderr.puts "[five00matic] listening on http://#{ENV.fetch("TICKET_HOST", "127.0.0.1")}:#{ENV.fetch("TICKET_PORT", "9292")} " \
               "(dry_run=#{config.dry_run?}, data=#{File.expand_path(config.data_dir)})"
 trap("INT") { exit! }
 trap("TERM") { exit! }
@@ -80,7 +80,7 @@ loop do
   Thread.new(client) do |c|
     serve(c, app)
   rescue StandardError => e
-    warn "[sentry-tickets] connection error: #{e.class}: #{e.message}"
+    warn "[five00matic] connection error: #{e.class}: #{e.message}"
   ensure
     begin
       c.close

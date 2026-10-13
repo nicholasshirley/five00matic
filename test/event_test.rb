@@ -3,7 +3,7 @@
 require_relative "test_helper"
 
 class EventTest < Minitest::Test
-  def event(data) = SentryTickets::Event.new(data)
+  def event(data) = Five00Matic::Event.new(data)
 
   # The fixture event with the raised exception's frames passed through the
   # block for editing.

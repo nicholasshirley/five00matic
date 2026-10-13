@@ -2,7 +2,7 @@
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 
-require "sentry_tickets"
+require "five00matic"
 require "minitest/autorun"
 require "tmpdir"
 require "stringio"
@@ -68,7 +68,7 @@ module Fixture
   end
 
   def self.event(**payload_options)
-    SentryTickets::Event.new(payload(**payload_options))
+    Five00Matic::Event.new(payload(**payload_options))
   end
 
   def self.breadcrumb(category, message, timestamp: 1_758_268_800.123, level: "info", data: nil)
@@ -78,10 +78,10 @@ module Fixture
   end
 
   def self.store_dir
-    Dir.mktmpdir("sentry-tickets-test")
+    Dir.mktmpdir("five00matic-test")
   end
 
   def self.store(dir = store_dir)
-    SentryTickets::Store.new(dir)
+    Five00Matic::Store.new(dir)
   end
 end

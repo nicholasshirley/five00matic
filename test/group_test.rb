@@ -5,7 +5,7 @@ require_relative "test_helper"
 class GroupTest < Minitest::Test
   T0 = Time.utc(2026, 9, 19, 12)
 
-  def seen_once(at: T0) = SentryTickets::Group.start("fp", at: at).record(Fixture.event, at: at)
+  def seen_once(at: T0) = Five00Matic::Group.start("fp", at: at).record(Fixture.event, at: at)
 
   def test_record_counts_and_remembers_the_latest_event
     group = seen_once.record(Fixture.event(id: "e2"), at: T0 + 60)

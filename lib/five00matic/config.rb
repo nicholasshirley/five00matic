@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module SentryTickets
+module Five00Matic
   # Runtime configuration from the environment.
   #
   # TICKET_REPO           owner/repo that receives issues   (GITHUB_REPO works too)

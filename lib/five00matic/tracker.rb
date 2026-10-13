@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module SentryTickets
+module Five00Matic
   # Records each error occurrence and gives the destination whatever it is
   # now owed: the issue on a fingerprint's first sighting, a throttled
   # recurrence notice after that. A failed delivery is kept on the group and

@@ -3,7 +3,7 @@
 require "json"
 require "fileutils"
 
-module SentryTickets
+module Five00Matic
   # The groups, persisted in one JSON file that is rewritten atomically on
   # every change, so counts and notice anchors survive restarts.
   class Store

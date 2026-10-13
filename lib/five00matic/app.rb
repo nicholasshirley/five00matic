@@ -2,7 +2,7 @@
 
 require "json"
 
-module SentryTickets
+module Five00Matic
   # The Rack face of the tracker: POST /events takes the event hash a
   # before_send hook has and answers with what happened to it; GET /health
   # and /issues report on the store.

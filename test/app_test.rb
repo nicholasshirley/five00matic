@@ -5,10 +5,10 @@ require_relative "test_helper"
 class AppTest < Minitest::Test
   def setup
     dir = Fixture.store_dir
-    @config = SentryTickets::Config.new(
+    @config = Five00Matic::Config.new(
       repo: nil, token: nil, data_dir: dir, notice_interval: 0 # 0: always due, no GitHub
     )
-    @app = SentryTickets::App.new(@config)
+    @app = Five00Matic::App.new(@config)
     @outbox = File.join(dir, "outbox")
   end
 
@@ -144,8 +144,8 @@ class AppTest < Minitest::Test
   def test_dry_run_outbox_failure_is_recorded_not_500
     dir = Fixture.store_dir
     File.write(File.join(dir, "outbox"), "x") # outbox path taken by a file
-    app = SentryTickets::App.new(
-      SentryTickets::Config.new(repo: nil, token: nil, data_dir: dir, notice_interval: 0)
+    app = Five00Matic::App.new(
+      Five00Matic::Config.new(repo: nil, token: nil, data_dir: dir, notice_interval: 0)
     )
     status, _, body = post(Fixture.payload.to_json, {}, app: app)
     resp = JSON.parse(body.join)
@@ -160,7 +160,7 @@ class AppTest < Minitest::Test
     assert_equal 200, status
     health = JSON.parse(body.join)
     assert_equal 0, health["tracked"]
-    assert_equal SentryTickets::VERSION, health["version"]
+    assert_equal Five00Matic::VERSION, health["version"]
   end
 
   def test_health_and_issues
