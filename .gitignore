@@ -2,3 +2,4 @@ data/
 sample/
 *.gem
 .byebug_history
+Gemfile.lock

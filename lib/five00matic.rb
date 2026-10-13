@@ -4,6 +4,7 @@ require "json"
 require "digest/sha2"
 require "time"
 
+require_relative "five00matic/version"
 require_relative "five00matic/config"
 require_relative "five00matic/event"
 require_relative "five00matic/group"
@@ -20,5 +21,4 @@ require_relative "five00matic/app"
 # before_send hook) and turns each unique error into a GitHub issue, with
 # throttled recurrence notices.
 module Five00Matic
-  VERSION = "0.1.0"
 end
