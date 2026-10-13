@@ -126,7 +126,10 @@ module SentryTickets
 
       # Raw source lines, newline-terminated; the SDK pads with nil where the
       # context runs past the start or end of the file.
-      def context(key) = Array(@data[key]).grep(String).map(&:chomp)
+      def context(key)
+        lines = @data[key]
+        lines.is_a?(Array) ? lines.grep(String).map(&:chomp) : []
+      end
     end
 
     private

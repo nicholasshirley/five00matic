@@ -55,13 +55,13 @@ class TicketTest < Minitest::Test
     assert_includes body, "          end"
   end
 
-  def test_stacktrace_tolerates_non_array_frame_context
+  def test_stacktrace_reads_non_array_frame_context_as_empty
     event = Fixture.payload
     frame = event.dig("exception", "values").last["stacktrace"]["frames"].last
     frame["pre_context"] = "garbage"
     frame["post_context"] = "garbage"
     body = ticket(event).body
-    assert_includes body, "-- Order.load"
+    assert_includes body, "-- Order.load at /app/lib/orders.rb:26\n>       <%= @customer.name %>\n\n-- Order.index"
   end
 
   def test_stacktrace_skips_context_padding_past_the_file_edges
