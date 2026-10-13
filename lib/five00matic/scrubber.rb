@@ -63,12 +63,14 @@ module Five00Matic
     end
 
     # Filtered pair by pair, so repeated keys and their order survive.
+    # decode_www_form refuses text holding any non-ASCII byte, which a client
+    # that does not percent-encode sends and Puma passes on as it came, so
+    # those bytes are encoded first.
     def filtered_query(query)
       return query unless query.is_a?(String) && !query.empty?
 
-      URI.encode_www_form(URI.decode_www_form(query).map { |key, value| [key, filtered({ key => value })[key]] })
-    rescue ArgumentError
-      query
+      ascii = query.b.gsub(/[\x80-\xFF]/n) { |byte| format("%%%02X", byte.ord) }
+      URI.encode_www_form(URI.decode_www_form(ascii).map { |key, value| [key, filtered({ key => value })[key]] })
     end
   end
 end

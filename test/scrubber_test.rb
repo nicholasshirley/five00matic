@@ -53,6 +53,13 @@ class ScrubberTest < Minitest::Test
     assert_equal({ "rails.error" => { "email" => "[FILTERED]" }, "os" => { "name" => "darwin" } }, scrubbed["contexts"])
   end
 
+  def test_query_sent_without_percent_encoding_is_filtered_too
+    payload = request_payload
+    payload["request"]["query_string"] = "password=s3cret&u=José"
+    assert_equal "password=%5BFILTERED%5D&u=Jos%C3%A9",
+                 Five00Matic::Scrubber.new(FakeFilter.new).scrub(payload).dig("request", "query_string")
+  end
+
   def test_json_body_text_is_parsed_for_the_filter_and_other_text_is_kept
     payload = request_payload
     payload["request"]["data"] = '{"password":"p","q":1}'
