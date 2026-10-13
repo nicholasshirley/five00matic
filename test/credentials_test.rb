@@ -49,6 +49,22 @@ class CredentialsTest < Minitest::Test
     end
   end
 
+  def test_installation_is_looked_up_again_after_a_failed_mint
+    gone = ["404 Not Found", '{"message": "Not Found"}']
+    reinstalled = ["200 OK", '[{"id": 78, "account": {"login": "you"}}]']
+    Fixture.answering(INSTALLATION, granted("ghs_abc", T0 + 3600), gone, reinstalled,
+                      granted("ghs_def", T0 + 7200)) do |api_base, requests|
+      auth = app_token(api_base)
+      assert_equal "ghs_abc", auth.token(now: T0)
+      assert_raises(Five00Matic::DeliveryError) { auth.token(now: T0 + 3400) }
+      assert_equal "ghs_def", auth.token(now: T0 + 3400), "an app installed again has a new installation id"
+      assert_equal [%w[GET /app/installations], %w[POST /app/installations/77/access_tokens],
+                    %w[POST /app/installations/77/access_tokens],
+                    %w[GET /app/installations], %w[POST /app/installations/78/access_tokens]],
+                   requests.map { |method, path, _, _| [method, path] }
+    end
+  end
+
   def test_more_than_one_installation_is_refused
     Fixture.answering(["200 OK", '[{"id": 1}, {"id": 2}]']) do |api_base, _requests|
       error = assert_raises(Five00Matic::DeliveryError) { app_token(api_base).token }

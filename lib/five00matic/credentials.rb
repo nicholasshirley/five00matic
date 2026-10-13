@@ -14,8 +14,9 @@ module Five00Matic
   # exchanges it for an installation access token, and hands that token out
   # until shortly before it expires. The app is expected to be installed on
   # one account, the one owning the repos it files into; that installation
-  # is looked up on first use. Failures become DeliveryError, so the ticket
-  # that needed the token is retried on the error's next occurrence.
+  # is looked up on first use, and again after a mint fails, since an app
+  # installed afresh has a new id. Failures become DeliveryError, so the
+  # ticket that needed the token is retried on the error's next occurrence.
   class AppToken
     # GitHub accepts a JWT expiring up to ten minutes out; this leaves room
     # for a clock a little ahead of GitHub's.
@@ -39,6 +40,9 @@ module Five00Matic
       @mutex.synchronize do
         mint(now) if @expires_at - now < RENEW_MARGIN
         @token
+      rescue DeliveryError
+        @installation_id = nil
+        raise
       end
     end
 
