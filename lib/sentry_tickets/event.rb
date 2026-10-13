@@ -142,6 +142,9 @@ module SentryTickets
       frames = raised.app_frames
       return [raised.type, raised.message] if frames.empty?
 
+      # filename only, without location's abs_path fallback: the SDK sends
+      # filename with the project root or load path stripped, while abs_path
+      # carries the deploy directory, which can change with every release.
       [raised.type, *frames.map { |f| "#{f.filename}:#{f.label}" }]
     end
 
