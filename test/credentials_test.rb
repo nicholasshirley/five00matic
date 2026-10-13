@@ -69,6 +69,13 @@ class CredentialsTest < Minitest::Test
     assert_match(/connection refused/i, error.message)
   end
 
+  def test_token_response_that_is_not_an_object_is_a_delivery_error
+    Fixture.answering(INSTALLATION, ["201 Created", "null"]) do |api_base, _requests|
+      error = assert_raises(Five00Matic::DeliveryError) { app_token(api_base).token }
+      assert_match(/not an object/, error.message)
+    end
+  end
+
   def test_token_response_without_expiry_is_a_delivery_error
     Fixture.answering(INSTALLATION, ["201 Created", '{"token": "ghs_abc"}']) do |api_base, _requests|
       error = assert_raises(Five00Matic::DeliveryError) { app_token(api_base).token }

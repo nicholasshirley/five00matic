@@ -48,6 +48,8 @@ module Five00Matic
       jwt = jwt(now)
       @installation_id ||= installation_id(jwt)
       granted = request(Net::HTTP::Post, "/app/installations/#{@installation_id}/access_tokens", jwt)
+      raise DeliveryError, "GitHub App token response is not an object" unless granted.is_a?(Hash)
+
       @token = granted.fetch("token")
       @expires_at = Time.iso8601(granted.fetch("expires_at"))
     rescue KeyError, ArgumentError, TypeError => e
