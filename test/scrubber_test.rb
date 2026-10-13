@@ -93,6 +93,9 @@ class ScrubberTest < Minitest::Test
     assert_equal "garbage", scrubbed["breadcrumbs"]
     assert_nil scrubbed["user"]
     assert_equal [1], scrubbed["tags"]
+
+    body = Five00Matic::Scrubber.new(FakeFilter.new).scrub(Fixture.payload.merge("request" => { "data" => 5 }))
+    assert_equal 5, body.dig("request", "data")
   end
 
   def test_event_without_scope_sections_gains_none

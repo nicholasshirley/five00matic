@@ -72,6 +72,16 @@ class CredentialsTest < Minitest::Test
     end
   end
 
+  def test_installation_list_of_an_unexpected_shape_is_a_delivery_error
+    shapes = { '{"message": "x"}' => /0 installations/, "[1]" => /no id/, '[{"account": {}}]' => /no id/ }
+    shapes.each do |body, message|
+      Fixture.answering(["200 OK", body]) do |api_base, _requests|
+        error = assert_raises(Five00Matic::DeliveryError) { app_token(api_base).token }
+        assert_match message, error.message, body
+      end
+    end
+  end
+
   def test_rejected_jwt_is_a_delivery_error
     Fixture.answering(["401 Unauthorized", '{"message": "A JSON web token could not be decoded"}']) do |api_base, _|
       error = assert_raises(Five00Matic::DeliveryError) { app_token(api_base).token }
