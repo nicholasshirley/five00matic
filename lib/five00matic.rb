@@ -16,6 +16,8 @@ require_relative "five00matic/delivery_error"
 require_relative "five00matic/github"
 require_relative "five00matic/outbox"
 require_relative "five00matic/tracker"
+require_relative "five00matic/scrubber"
+require_relative "five00matic/hook"
 require_relative "five00matic/app"
 
 # Receives Sentry-shaped error events from the sentry-ruby SDK (via a
@@ -32,5 +34,12 @@ module Five00Matic
         GitHub.new(repo: config.repo, credentials: config.credentials, labels: config.labels, api_base: config.api_base)
       end
     Tracker.new(store: Store.new(config.data_dir), destination: destination, notice_interval: config.notice_interval)
+  end
+
+  # The before_send callable for Sentry.init, from the keywords Config
+  # accepts (repo:, app_id:, private_key:, data_dir:, ...) plus the hook's
+  # own: filter: (the app's parameter filter), mode: and logger:.
+  def self.before_send(filter: nil, mode: :shadow, logger: nil, **config)
+    Hook.new(tracker: tracker(Config.new(**config)), scrubber: Scrubber.new(filter), mode: mode, logger: logger)
   end
 end

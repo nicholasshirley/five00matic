@@ -121,3 +121,16 @@ module Fixture
     Five00Matic::Store.new(dir)
   end
 end
+
+# Stands in for ActiveSupport::ParameterFilter: replaces the value of every
+# key naming a secret, at any depth, and returns a new hash.
+class FakeFilter
+  def filter(hash)
+    hash.to_h do |key, value|
+      [key, if key.to_s.match?(/passw|email|token/) then "[FILTERED]"
+            elsif value.is_a?(Hash) then filter(value)
+            else value
+            end]
+    end
+  end
+end
