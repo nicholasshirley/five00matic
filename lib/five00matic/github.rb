@@ -29,22 +29,28 @@ module Five00Matic
 
     # Returns { "repo" => String, "number" => Integer, "url" => String }
     def open_issue(title:, body:)
-      issue = post("/repos/#{@repo}/issues", title: title, body: body, labels: @labels)
+      issue = post("/repos/#{@repo}/issues", { title: title, body: body, labels: @labels }, @credentials.token)
       raise DeliveryError, "GitHub response has no issue number" if issue["number"].nil?
 
       { "repo" => @repo, "number" => issue["number"], "url" => issue["html_url"] }
     end
 
+    # A 404 for the comment means its issue is gone. The token is fetched
+    # outside that rescue: an app whose installation was removed fails to
+    # mint with a 404 too, and that says nothing about the issue.
     def comment(issue, body:)
-      post("/repos/#{@repo}/issues/#{issue['number']}/comments", body: body)
-    rescue DeliveryError => e
-      raise e.status == 404 ? IssueGone.new(e.message, status: 404) : e
+      token = @credentials.token
+      begin
+        post("/repos/#{@repo}/issues/#{issue['number']}/comments", { body: body }, token)
+      rescue DeliveryError => e
+        raise e.status == 404 ? IssueGone.new(e.message, status: 404) : e
+      end
     end
 
     private
 
-    def post(path, payload)
-      response = send_request(path, JSON.generate(payload), @credentials.token)
+    def post(path, payload, token)
+      response = send_request(path, JSON.generate(payload), token)
       unless response.is_a?(Net::HTTPSuccess)
         raise DeliveryError.new("GitHub API #{response.code}: #{response.body.to_s[0, 300]}",
                                 status: response.code.to_i)

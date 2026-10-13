@@ -36,6 +36,16 @@ class GitHubTest < Minitest::Test
     end
   end
 
+  # An AppToken whose installation is gone fails to mint with a 404 of its
+  # own, which says nothing about the issue.
+  def test_comment_without_a_token_is_not_issue_gone
+    no_token = Object.new
+    def no_token.token = raise(Five00Matic::DeliveryError.new("GitHub App auth 404: Not Found", status: 404))
+    github = Five00Matic::GitHub.new(repo: "you/repo", credentials: no_token, labels: [], api_base: "http://unused")
+    error = assert_raises(Five00Matic::DeliveryError) { github.comment({ "number" => 7 }, body: "b") }
+    assert_instance_of Five00Matic::DeliveryError, error
+  end
+
   def test_network_error_wraps_as_delivery_error
     error = assert_raises(Five00Matic::DeliveryError) do
       github("http://127.0.0.1:1").open_issue(title: "t", body: "b")
