@@ -70,9 +70,11 @@ class AppTest < Minitest::Test
   end
 
   def test_garbage_rejected
-    status, _, body = post("not json at all")
-    assert_equal 400, status
-    assert_includes JSON.parse(body.join)["error"], "unrecognized"
+    ["not json at all", "[1,2]", "42"].each do |body|
+      status, _, resp_body = post(body)
+      assert_equal 400, status, body
+      assert_includes JSON.parse(resp_body.join)["error"], "unrecognized", body
+    end
   end
 
   def test_event_without_exception_or_message_is_rejected
