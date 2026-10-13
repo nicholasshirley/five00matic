@@ -96,13 +96,14 @@ Notes:
   the usual place. Hosts cannot share it (see State below).
 - Without `app_id` and `private_key` (or a `token:`), tickets are written
   to `data_dir/outbox` as markdown files: a dry run for development.
-- `send_default_pii` can stay on. The scrubber drops cookies and the
-  Authorization header whatever the setting, and runs the app's
-  `filter_parameters` over the request body, the query string, breadcrumb
-  data, user, tags, extra and contexts. The SDK itself applies that filter
-  to breadcrumb params only; the request body goes out as submitted, so a
-  failed login would otherwise file the password. Sentry receives the
-  event unscrubbed, as before.
+- `send_default_pii` can stay on. The scrubber drops cookies, the
+  Authorization header and the Rack env beyond the SDK's default
+  `REMOTE_ADDR`, `SERVER_NAME` and `SERVER_PORT` whatever the settings,
+  and runs the app's `filter_parameters` over the request body, the query
+  string, breadcrumb data, user, tags, extra and contexts. The SDK itself
+  applies that filter to breadcrumb params only; the request body goes out
+  as submitted, so a failed login would otherwise file the password.
+  Sentry receives the event unscrubbed, as before.
 - Delivery is inline, so the hook answers only as fast as GitHub does. The
   SDK queues 30 events for its worker and drops beyond that.
 - The hook never raises into the SDK.

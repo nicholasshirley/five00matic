@@ -27,6 +27,19 @@ class ScrubberTest < Minitest::Test
     assert_equal "email=a%40b.example&page=2&tag=x&tag=y", request["query_string"]
   end
 
+  # An app that empties rack_env_whitelist gets the whole Rack env sent:
+  # the cookie and credential headers and the raw body among it.
+  def test_rack_env_is_cut_to_the_sdk_defaults_even_without_a_filter
+    payload = request_payload
+    payload["request"]["env"] = {
+      "REMOTE_ADDR" => "203.0.113.7", "SERVER_NAME" => "shop.example", "SERVER_PORT" => "443",
+      "HTTP_COOKIE" => "_session=s3cret", "HTTP_AUTHORIZATION" => "Bearer t0ken",
+      "rack.request.form_vars" => "user%5Bpassword%5D=hunter2"
+    }
+    assert_equal({ "REMOTE_ADDR" => "203.0.113.7", "SERVER_NAME" => "shop.example", "SERVER_PORT" => "443" },
+                 Five00Matic::Scrubber.new.scrub(payload).dig("request", "env"))
+  end
+
   def test_the_payload_given_is_left_as_it_was
     payload = request_payload
     Five00Matic::Scrubber.new(FakeFilter.new).scrub(payload)

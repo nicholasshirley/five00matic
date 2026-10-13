@@ -5,15 +5,20 @@ require "uri"
 
 module Five00Matic
   # Removes what a ticket must never carry from an event hash before it is
-  # grouped, stored and rendered. Cookies and the Authorization header go
-  # unconditionally. A parameter filter, when given (Rails'
-  # ActiveSupport::ParameterFilter built from the app's filter_parameters,
-  # or anything that answers filter(hash) with a hash), is applied to the
-  # request body and query string, breadcrumb data, user, tags, extra and
-  # contexts. The SDK runs the app's filter over breadcrumb params only,
-  # never over the request body, so without this a login error would file
-  # the password.
+  # grouped, stored and rendered. Cookies, the Authorization header and the
+  # Rack env beyond the SDK's default keys go unconditionally. A parameter
+  # filter, when given (Rails' ActiveSupport::ParameterFilter built from the
+  # app's filter_parameters, or anything that answers filter(hash) with a
+  # hash), is applied to the request body and query string, breadcrumb data,
+  # user, tags, extra and contexts. The SDK runs the app's filter over
+  # breadcrumb params only, never over the request body, so without this a
+  # login error would file the password.
   class Scrubber
+    # sentry-ruby's default rack_env_whitelist. An app that empties it sends
+    # the whole Rack env, cookie and credential headers and the raw body
+    # included, under names no list of secrets keeps up with.
+    RACK_ENV_KEYS = %w[REMOTE_ADDR SERVER_NAME SERVER_PORT].freeze
+
     def initialize(filter = nil)
       @filter = filter
     end
@@ -34,6 +39,7 @@ module Five00Matic
       request.delete("cookies")
       headers = request["headers"]
       headers.delete_if { |name, _| %w[authorization cookie].include?(name.to_s.downcase) } if headers.is_a?(Hash)
+      request["env"] = request["env"].slice(*RACK_ENV_KEYS) if request["env"].is_a?(Hash)
       return if @filter.nil?
 
       request["data"] = filtered_body(request["data"]) if request.key?("data")
