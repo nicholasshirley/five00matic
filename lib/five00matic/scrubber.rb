@@ -28,7 +28,7 @@ module Five00Matic
     def scrub(payload)
       event = JSON.parse(JSON.generate(payload))
       scrub_request(event["request"]) if event["request"].is_a?(Hash)
-      %w[user tags extra contexts].each { |key| event[key] = filtered(event[key]) }
+      %w[user tags extra contexts].each { |key| event[key] = filtered(event[key]) if event.key?(key) }
       scrub_breadcrumbs(event["breadcrumbs"]) if event["breadcrumbs"].is_a?(Hash)
       event
     end

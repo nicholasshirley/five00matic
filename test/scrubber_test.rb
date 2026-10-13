@@ -95,6 +95,11 @@ class ScrubberTest < Minitest::Test
     assert_equal [1], scrubbed["tags"]
   end
 
+  def test_event_without_scope_sections_gains_none
+    assert_equal({ "event_id" => "x", "message" => "boom" },
+                 Five00Matic::Scrubber.new(FakeFilter.new).scrub({ "event_id" => "x", "message" => "boom" }))
+  end
+
   def test_request_without_body_or_query_gains_neither
     payload = Fixture.payload.merge("request" => { "url" => "https://shop.example/", "headers" => {} })
     request = Five00Matic::Scrubber.new(FakeFilter.new).scrub(payload)["request"]
