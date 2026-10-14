@@ -21,7 +21,8 @@ class GitHubTest < Minitest::Test
     created = '{"number": 7, "html_url": "https://github.com/you/repo/issues/7"}'
     Fixture.answering(["201 Created", created]) do |api_base, requests|
       issue = github(api_base).open_issue(title: "t", body: "b")
-      assert_equal({ "repo" => "you/repo", "number" => 7, "url" => "https://github.com/you/repo/issues/7" }, issue)
+      assert_equal({ "repo" => "you/repo", "number" => 7, "url" => "https://github.com/you/repo/issues/7" }, issue,
+                   "owns? and comment read the repo and number back from state")
 
       method, path, headers, body = requests.first
       assert_equal ["POST", "/repos/you/repo/issues"], [method, path]
@@ -30,9 +31,34 @@ class GitHubTest < Minitest::Test
     end
   end
 
+  def test_open_issue_without_a_number_in_the_response_raises
+    Fixture.answering(["201 Created", '{"html_url": "https://github.com/you/repo/issues/7"}']) do |api_base, _requests|
+      error = assert_raises(Five00Matic::DeliveryError) { github(api_base).open_issue(title: "t", body: "b") }
+      assert_equal "GitHub response has no issue number", error.message
+    end
+  end
+
+  def test_comment_posts_the_notice_on_the_issue
+    Fixture.answering(["201 Created", '{"id": 1}']) do |api_base, requests|
+      github(api_base).comment({ "repo" => "you/repo", "number" => 7 }, body: "b")
+
+      method, path, _headers, body = requests.first
+      assert_equal ["POST", "/repos/you/repo/issues/7/comments"], [method, path]
+      assert_equal({ "body" => "b" }, JSON.parse(body))
+    end
+  end
+
   def test_comment_on_a_missing_issue_raises_issue_gone
     Fixture.answering(["404 Not Found", '{"message":"Not Found"}']) do |api_base, _requests|
       assert_raises(Five00Matic::IssueGone) { github(api_base).comment({ "number" => 7 }, body: "b") }
+    end
+  end
+
+  def test_comment_failure_other_than_a_404_is_not_issue_gone
+    Fixture.answering(["502 Bad Gateway", '{"message": "boom"}']) do |api_base, _requests|
+      error = assert_raises(Five00Matic::DeliveryError) { github(api_base).comment({ "number" => 7 }, body: "b") }
+      refute_kind_of Five00Matic::IssueGone, error, "a transient failure must not drop the issue"
+      assert_equal 502, error.status
     end
   end
 

@@ -23,6 +23,7 @@ lib/five00matic/group.rb       one fingerprint: counts, its issue, notice anchor
 lib/five00matic/store.rb       the groups, persisted (JSON file, file-locked)
 lib/five00matic/ticket.rb      GitHub-issue markdown rendering
 lib/five00matic/notice.rb      recurrence-notice comment rendering
+lib/five00matic/delivery_error.rb  delivery failures (DeliveryError, IssueGone)
 lib/five00matic/github.rb      thin GitHub REST client
 lib/five00matic/outbox.rb      dry-run stand-in: tickets as markdown files
 lib/five00matic/tracker.rb     record an occurrence, deliver what GitHub is owed
@@ -33,7 +34,7 @@ bin/serve.rb                   zero-dependency standalone server (stdlib TCPServ
 config.ru                      RACK entry (puma/rackup) for a standalone receiver, mounted at /sentry
 scripts/make_sample_event.rb   generates a real event using the installed SDK
 test/                          minitest suite
-sample/                        generated sample payloads (gitignored)
+sample/                        generated sample payload (gitignored)
 data/                          groups.json + outbox/ (gitignored)
 ```
 
@@ -145,7 +146,7 @@ TICKET_REPO=you/your-repo TICKET_TOKEN=ghp_xxx ruby bin/serve.rb
 is for local use; for anything else run `config.ru` behind a real app
 server, which mounts the app at `/sentry`.
 
-Generate the demo payloads (runs under the RVM 3.2.0 where the 5.10 SDK lives):
+Generate the demo payload (runs under the RVM 3.2.0 where the 5.10 SDK lives):
 
 ```sh
 GEM_HOME=$HOME/.rvm/gems/ruby-3.2.0 \
@@ -182,6 +183,9 @@ end
 
 Notes:
 
+- The default `TICKET_URL` is `bin/serve.rb`'s address. `config.ru` mounts
+  the app at `/sentry`, so for a receiver run from it, point `TICKET_URL` at
+  `/sentry/events`.
 - Returning `event` instead of `nil` double-sends (Sentry + receiver).
 - If the POST raises (receiver down) or is refused (any non-2xx), returning
   `nil` would lose the event: Sentry never sees it and neither does GitHub.
