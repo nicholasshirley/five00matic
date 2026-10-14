@@ -1,0 +1,116 @@
+# frozen_string_literal: true
+
+require_relative "test_helper"
+require "socket"
+
+class GitHubTest < Minitest::Test
+  def github(api_base)
+    SentryTickets::GitHub.new(repo: "you/repo", token: "t", labels: ["error-report"], api_base: api_base)
+  end
+
+  # Serves one canned HTTP response, and yields the API base to point at it
+  # with the requests received so far, each [method, path, headers, body].
+  def answering(status_line, body)
+    server = TCPServer.new("127.0.0.1", 0)
+    requests = []
+    thread = Thread.new do
+      sock = server.accept
+      method, path, = sock.gets.split
+      headers = {}
+      while (line = sock.gets) != "\r\n"
+        name, value = line.split(":", 2)
+        headers[name.downcase] = value.strip
+      end
+      # Read the whole request: closing with it unread resets the connection.
+      requests << [method, path, headers, sock.read(headers["content-length"].to_i)]
+      sock.write "HTTP/1.1 #{status_line}\r\nContent-Type: application/json\r\n" \
+                 "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n"
+      sock.write body
+      sock.close
+    end
+    yield "http://127.0.0.1:#{server.addr[1]}", requests
+  ensure
+    thread.join
+    server.close
+  end
+
+  def test_owns_only_issues_opened_in_its_repo
+    assert github("http://unused").owns?({ "repo" => "you/repo", "number" => 7 })
+    assert github("http://unused").owns?({ "repo" => "You/Repo", "number" => 7 }), "repo names are case-insensitive"
+    refute github("http://unused").owns?({ "repo" => "you/old-repo", "number" => 7 }),
+           "#7 of the old repo is not #7 of this one"
+    refute github("http://unused").owns?({ "url" => "/data/outbox/issue-boom.md" }), "an outbox issue is not GitHub's"
+    refute github("http://unused").owns?(nil)
+  end
+
+  def test_comment_on_a_missing_issue_raises_issue_gone
+    answering("404 Not Found", '{"message":"Not Found"}') do |api_base|
+      assert_raises(SentryTickets::IssueGone) { github(api_base).comment({ "number" => 7 }, body: "b") }
+    end
+  end
+
+  def test_open_issue_posts_the_issue_and_returns_where_it_was_filed
+    created = '{"number": 7, "html_url": "https://github.com/you/repo/issues/7"}'
+    answering("201 Created", created) do |api_base, requests|
+      issue = github(api_base).open_issue(title: "t", body: "b")
+      assert_equal({ "repo" => "you/repo", "number" => 7, "url" => "https://github.com/you/repo/issues/7" }, issue,
+                   "owns? and comment read the repo and number back from state")
+
+      method, path, _headers, body = requests.first
+      assert_equal ["POST", "/repos/you/repo/issues"], [method, path]
+      assert_equal({ "title" => "t", "body" => "b", "labels" => ["error-report"] }, JSON.parse(body))
+    end
+  end
+
+  def test_open_issue_without_a_number_in_the_response_raises
+    answering("201 Created", '{"html_url": "https://github.com/you/repo/issues/7"}') do |api_base|
+      error = assert_raises(SentryTickets::DeliveryError) { github(api_base).open_issue(title: "t", body: "b") }
+      assert_equal "GitHub response has no issue number", error.message
+    end
+  end
+
+  def test_comment_posts_the_notice_on_the_issue
+    answering("201 Created", '{"id": 1}') do |api_base, requests|
+      github(api_base).comment({ "repo" => "you/repo", "number" => 7 }, body: "b")
+
+      method, path, _headers, body = requests.first
+      assert_equal ["POST", "/repos/you/repo/issues/7/comments"], [method, path]
+      assert_equal({ "body" => "b" }, JSON.parse(body))
+    end
+  end
+
+  def test_comment_failure_other_than_a_404_is_not_issue_gone
+    answering("502 Bad Gateway", '{"message": "boom"}') do |api_base|
+      error = assert_raises(SentryTickets::DeliveryError) { github(api_base).comment({ "number" => 7 }, body: "b") }
+      refute_kind_of SentryTickets::IssueGone, error, "a transient failure must not drop the issue"
+      assert_equal 502, error.status
+    end
+  end
+
+  def test_network_error_wraps_as_delivery_error
+    error = assert_raises(SentryTickets::DeliveryError) do
+      github("http://127.0.0.1:1").open_issue(title: "t", body: "b")
+    end
+    assert_match(/connection refused/i, error.message)
+  end
+
+  # A middlebox can answer GitHub's 2xx with a non-JSON, non-UTF-8 body; the
+  # JSON::ParserError message then carries raw bytes, and would otherwise
+  # land in state and break every future persist.
+  def test_garbage_success_body_wraps_with_valid_utf8_message
+    answering("200 OK", "\xFF\xFEbad!".b) do |api_base|
+      error = assert_raises(SentryTickets::DeliveryError) do
+        github(api_base).open_issue(title: "t", body: "b")
+      end
+      assert_match(/JSON::ParserError/, error.message)
+      assert error.message.valid_encoding?, "wrapped error must be valid UTF-8, got #{error.message.inspect}"
+    end
+  end
+
+  def test_delivery_error_messages_are_valid_utf8
+    # Net::HTTP labels bodies binary; valid multibyte text must survive and
+    # invalid bytes must not reach the JSON state file.
+    assert_equal "GitHub API 422: café", SentryTickets::DeliveryError.new("GitHub API 422: café".b).message
+    assert_equal "boom: \uFFFD\uFFFD", SentryTickets::DeliveryError.new("boom: \xFF\xFE".b).message
+  end
+end

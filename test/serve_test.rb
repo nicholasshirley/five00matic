@@ -38,7 +38,7 @@ class ServeTest < Minitest::Test
   end
 
   def test_event_hash_opens_issue_in_outbox
-    res = http_post(Fixture.event.to_json)
+    res = http_post(Fixture.payload.to_json)
     assert_equal 200, res.code.to_i
     assert_equal "opened", JSON.parse(res.body)["action"]
     assert_equal 1, Dir[File.join(@dir, "outbox", "issue-*.md")].size
@@ -48,19 +48,6 @@ class ServeTest < Minitest::Test
     assert_equal 1, health["tracked"]
     assert health["dry_run"]
     assert_equal SentryTickets::VERSION, health["version"]
-  end
-
-  def test_envelope_delivered_with_dsn_project
-    event = Fixture.event
-    wire = [
-      JSON.generate("event_id" => event["event_id"], "dsn" => "https://k@my-host.local/7",
-                    "sent_at" => "2026-09-19T12:00:00Z"),
-      JSON.generate("type" => "event"),
-      event.to_json
-    ].join("\n")
-    res = http_post(wire)
-    assert_equal 200, res.code.to_i
-    assert_equal "7", JSON.parse(res.body)["project"]
   end
 
   def test_garbage_is_400

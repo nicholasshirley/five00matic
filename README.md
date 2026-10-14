@@ -1,14 +1,13 @@
 # sentry_experiment
 
 A prototype error-ticket receiver: it accepts the error event that
-sentry-ruby has fully assembled (via a `before_send` hook, or a raw Sentry
-envelope POST) and turns each unique error into a well-formatted GitHub
-issue ticket, with throttled recurrence notices. No dependency on Sentry's
-servers and no dependency on any gem beyond the Ruby stdlib (+ rack
-compatibility for mounting).
+sentry-ruby has fully assembled (via a `before_send` hook) and turns each
+unique error into a well-formatted GitHub issue ticket, with throttled
+recurrence notices. No dependency on Sentry's servers and no dependency on
+any gem beyond the Ruby stdlib (+ rack compatibility for mounting).
 
 Built against the payload shape of sentry-ruby 5.10 / sentry-rails 5.10 as
-installed under RVM Ruby 3.2.0, but the code runs on plain modern Ruby
+installed under RVM Ruby 3.2.0, but the code runs on plain Ruby 3.2 or newer
 (verified on 3.2 and 3.4) with zero installed gems.
 
 ## Layout
@@ -16,21 +15,27 @@ installed under RVM Ruby 3.2.0, but the code runs on plain modern Ruby
 ```
 lib/sentry_tickets.rb          entry point
 lib/sentry_tickets/config.rb   env-driven configuration
-lib/sentry_tickets/store.rb    fingerprint, counts, throttle anchors (JSON file)
+lib/sentry_tickets/event.rb    the SDK payload: fingerprint, title, sections
+lib/sentry_tickets/group.rb    one fingerprint: counts, its issue, notice anchors
+lib/sentry_tickets/store.rb    the groups, persisted (JSON file)
 lib/sentry_tickets/ticket.rb   GitHub-issue markdown rendering
-lib/sentry_tickets/github_sync.rb  thin REST client + dry-run outbox
+lib/sentry_tickets/notice.rb   recurrence-notice comment rendering
+lib/sentry_tickets/delivery_error.rb  delivery failures (DeliveryError, IssueGone)
+lib/sentry_tickets/github.rb   thin GitHub REST client
+lib/sentry_tickets/outbox.rb   dry-run stand-in: tickets as markdown files
+lib/sentry_tickets/tracker.rb  record an occurrence, deliver what GitHub is owed
 lib/sentry_tickets/app.rb      the RACK app (POST /events, GET /health, /issues)
 bin/serve.rb                   zero-dependency standalone server (stdlib TCPServer)
-config.ru                      RACK entry (puma/rackup) for a real deployment
+config.ru                      RACK entry (puma/rackup) for a real deployment, mounted at /sentry
 scripts/make_sample_event.rb   generates a real event using the installed SDK
 test/                          minitest suite
-sample/                        generated sample payloads (gitignored)
-data/                          state.json + outbox/ (gitignored)
+sample/                        generated sample payload (gitignored)
+data/                          groups.json + outbox/ (gitignored)
 ```
 
 ## Running
 
-No gems to install. Any modern Ruby works (3.2/3.4 verified):
+No gems to install. Ruby 3.2 or newer (3.2/3.4 verified):
 
 ```sh
 # tests
@@ -42,20 +47,19 @@ TICKET_NOTICE_INTERVAL=2 ruby bin/serve.rb      # port 9292, 127.0.0.1
 # real delivery: set repo + token and restart
 TICKET_REPO=you/your-repo TICKET_TOKEN=ghp_xxx ruby bin/serve.rb
 
-# fingerprints that only ever existed in dry-run mode have no GitHub issue
-# number yet; their first due recurrence after the switch opens an issue
-# instead of commenting.
+# an error filed only to the outbox has no GitHub issue yet; its next
+# occurrence after the switch opens one. Changing TICKET_REPO works the same
+# way: issues stay with the repo they were opened in.
 ```
 
-Generate the demo payloads (runs under the RVM 3.2.0 where the 5.10 SDK lives):
+Generate the demo payload (runs under the RVM 3.2.0 where the 5.10 SDK lives):
 
 ```sh
 GEM_HOME=$HOME/.rvm/gems/ruby-3.2.0 \
 GEM_PATH=$HOME/.rvm/gems/ruby-3.2.0:$HOME/.rvm/rubies/ruby-3.2.0/lib/ruby/gems/3.2.0 \
 $HOME/.rvm/rubies/ruby-3.2.0/bin/ruby scripts/make_sample_event.rb
 
-curl -s -X POST --data-binary @sample/event.json   http://127.0.0.1:9292/events
-curl -s -X POST --data-binary @sample/envelope.txt http://127.0.0.1:9292/events
+curl -s -X POST --data-binary @sample/event.json http://127.0.0.1:9292/events
 ```
 
 ## Wiring an existing app
@@ -64,44 +68,61 @@ In the app's Sentry init, intercept in `before_send` and deliver to the
 receiver:
 
 ```ruby
-TICKET_URL = ENV.fetch("TICKET_URL", "http://127.0.0.1:9292/events")
+TICKET_URI = URI(ENV.fetch("TICKET_URL", "http://127.0.0.1:9292/events"))
 
 Sentry.init do |config|
   config.dsn = ENV.fetch("SENTRY_DSN") # keep a valid DSN; the SDK needs it to enable sending
 
   config.before_send = lambda do |event, _hint|
-    uri = URI(TICKET_URL)
-    begin
-      Net::HTTP.post(uri, event.to_json_compatible.to_json, "Content-Type" => "application/json")
-      nil # returning nil stops the event from going to Sentry at all
-    rescue StandardError
-      event # receiver unreachable: fall back to Sentry rather than losing the event
+    response = Net::HTTP.start(TICKET_URI.host, TICKET_URI.port,
+                               use_ssl: TICKET_URI.scheme == "https", open_timeout: 2) do |http|
+      http.post(TICKET_URI.path, event.to_json_compatible.to_json, "Content-Type" => "application/json")
     end
+    # nil stops the event from going to Sentry at all; only do that once the
+    # receiver has taken it
+    response.is_a?(Net::HTTPSuccess) ? nil : event
+  rescue StandardError
+    event # receiver unreachable: fall back to Sentry rather than losing the event
   end
 end
 ```
 
 Notes:
 
+- The default `TICKET_URL` is `bin/serve.rb`'s address. `config.ru` mounts
+  the app at `/sentry`, so for a receiver run from it, point `TICKET_URL` at
+  `/sentry/events`.
 - Returning `event` instead of `nil` double-sends (Sentry + receiver).
-- If the POST raises (receiver down), the SDK's background worker logs the
-  error and drops the event - and returning `nil` means Sentry never saw it
-  either. The rescue above returns `event` so Sentry takes it as a fallback;
-  drop the rescue if you would rather lose the event than double-report.
+- If the POST raises (receiver down) or is refused (any non-2xx), returning
+  `nil` would lose the event: Sentry never sees it and neither does GitHub.
+  The hook above returns `event` in both cases so Sentry takes it as a
+  fallback; drop that if you would rather lose the event than double-report.
+- The receiver delivers to GitHub inline, so it answers only as fast as
+  GitHub does; the SDK worker waits for it (Net::HTTP's default read timeout
+  is 60s). The short open timeout keeps an unreachable receiver from holding
+  the worker that long.
 - The hook already runs on a background worker thread in the SDK; the POST is
   the only added latency. Keep it small, or queue it if your app also has a
   job system.
-- The receiver accepts the same event as a Sentry envelope too (a DSN pointed
-  at it would work: it reads the project id from the envelope's DSN header).
-- The event hash the hook receives is exactly what this receiver stores and
+- `before_send` is the only intake. Don't point `SENTRY_DSN` at the receiver:
+  the SDK would post envelopes to `/api/<project>/envelope/`, which it does
+  not serve.
+- The event hash the hook receives is exactly what this receiver groups and
   renders, including the full raw payload at the bottom of the ticket.
 
 ## Behavior
 
 - **Fingerprint** (dedup key): an explicit non-empty `event["fingerprint"]`
-  wins; otherwise derived from the raised exception's type + its 10 most
-  recent stack frames + message. Volatile data (tags, request ids) is
-  deliberately excluded so one bug is one ticket even across requests.
+  wins; otherwise the raised exception's type + the file and function of
+  each in-app stack frame (every frame, when the SDK marked none in-app).
+  Line numbers, messages and tags are deliberately left out: they vary
+  between occurrences of one bug (a deploy shifts lines; messages carry ids
+  and, on Ruby 3.2, object addresses; tags carry request ids). The message
+  is used only for an exception with no stack trace, or a message event.
+- **Rejected with 400**: a body that is not a JSON object, one holding
+  invalid UTF-8 or a non-finite number (the SDK can produce neither), and an
+  event with neither an exception nor a message. Sections of an unexpected
+  shape are otherwise read as empty rather than refused.
 - **First occurrence** of a fingerprint: an issue is opened immediately
   (count is 1).
 - **Recurrences**: count increments on every event, but a GitHub notification
@@ -111,17 +132,17 @@ Notes:
   next occurrence (the count was already persisted, so no event is lost); the
   HTTP response still reports 200 because the sender has handed off ownership.
   If GitHub answers 404 for a recurrence comment (the tracked issue was
-  deleted, or the repo was re-created), a replacement issue is opened instead
-  of erroring on every recurrence forever.
+  deleted, or the repo was re-created), the dead issue is dropped and a
+  replacement opened; should that fail too, the next occurrence opens one.
 - **Ticket size**: GitHub rejects issue bodies over 65,536 characters, so
   rendered tickets are capped below that. The raw-payload section switches to
   compact JSON and is clipped first; only an event whose structured sections
   alone overflow gets those clipped too.
-- **State** is a single JSON file written atomically; restarts and
-  redeploys keep counts and throttle anchors. State and outbox files carry
-  event content (user ids, request bodies) and are written owner-only
-  (0600). For a real deployment behind a load balancer, put state on shared
-  storage or keep a single instance.
+- **State** is a single JSON file (`data/groups.json`) written atomically;
+  restarts and redeploys keep counts and throttle anchors. State and outbox
+  files carry event content (user ids, request bodies) and are written
+  owner-only (0600). For a real deployment behind a load balancer, put state
+  on shared storage or keep a single instance.
 
 ## Known simplifications (prototype scope)
 
@@ -130,14 +151,14 @@ Notes:
   before the response arrives, the retry opens a duplicate issue. Issue
   creation has no idempotency key.
 - Single-node state file; not multi-process safe. Within one process the
-  ingest-to-delivery path is serialized per fingerprint, so a single
+  record-to-delivery path is serialized per fingerprint, so a single
   instance will not double-open an issue.
 - `bin/serve.rb` is a convenience, not a server: thread-per-connection, no
   read or header timeouts, no chunked-encoding or request-size limits. A
   slow client can hold a thread open; a hostile one can hold many. For
   anything but local use, run `config.ru` behind a real app server instead.
-- Fingerprinting is intentionally simple; Sentry's own is deeper (normalized
-  frames, in_app heuristics, user-supplied fingerprint arrays are honored).
-- Gzip'd envelopes are accepted (the SDK gzips payloads >= 30KB).
+- Fingerprinting approximates Sentry's: two raises of one exception type in
+  the same method share a ticket, and `{{ default }}` in an explicit
+  fingerprint is taken literally rather than expanded.
 - No authentication on the receiver endpoint itself; put it behind your
   normal internal-network/secret controls.

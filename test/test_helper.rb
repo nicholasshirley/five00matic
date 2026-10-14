@@ -6,7 +6,6 @@ require "sentry_tickets"
 require "minitest/autorun"
 require "tmpdir"
 require "stringio"
-require "zlib"
 
 module Fixture
   # Sentry-ruby 5.x payload shape after an event.to_json_compatible round
@@ -25,10 +24,13 @@ module Fixture
     f
   end
 
-  def self.event(
+  # value is what the SDK sends: Exception#detailed_message, which puts
+  # " (Type)" after the message and error_highlight lines beneath it.
+  def self.payload(
     id: "e0f1a2b3-c4d5-4e6f-a7b8-9c0d1e2f3a4b",
     type: "NoMethodError",
-    value: "undefined method `name' for nil:NilClass",
+    message: "undefined method `name' for nil:NilClass",
+    value: "#{message} (#{type})\n\n    <%= @customer.name %>\n                 ^^^^^",
     frame_lineno: 26,
     fingerprint: [],
     breadcrumbs: nil
@@ -52,7 +54,7 @@ module Fixture
       "fingerprint" => fingerprint,
       "exception" => {
         "values" => [
-          { "type" => "ArgumentError", "value" => "missing required parameter: user_id",
+          { "type" => "ArgumentError", "value" => "missing required parameter: user_id (ArgumentError)",
             "stacktrace" => { "frames" => [frame(5, function: "validate!")] } },
           { "type" => type, "value" => value,
             "stacktrace" => { "frames" => [frame(12, function: "index"),
@@ -65,6 +67,10 @@ module Fixture
     end
   end
 
+  def self.event(**payload_options)
+    SentryTickets::Event.new(payload(**payload_options))
+  end
+
   def self.breadcrumb(category, message, timestamp: 1_758_268_800.123, level: "info", data: nil)
     c = { "timestamp" => timestamp, "category" => category, "message" => message, "level" => level }
     c["data"] = data if data
@@ -75,7 +81,7 @@ module Fixture
     Dir.mktmpdir("sentry-tickets-test")
   end
 
-  def self.store(dir = store_dir, interval = 21_600)
-    SentryTickets::Store.new(data_dir: dir, notice_interval: interval)
+  def self.store(dir = store_dir)
+    SentryTickets::Store.new(dir)
   end
 end
