@@ -1,37 +1,11 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
-require "socket"
 
 class GitHubTest < Minitest::Test
   def github(api_base)
-    SentryTickets::GitHub.new(repo: "you/repo", token: "t", labels: ["error-report"], api_base: api_base)
-  end
-
-  # Serves one canned HTTP response, and yields the API base to point at it
-  # with the requests received so far, each [method, path, headers, body].
-  def answering(status_line, body)
-    server = TCPServer.new("127.0.0.1", 0)
-    requests = []
-    thread = Thread.new do
-      sock = server.accept
-      method, path, = sock.gets.split
-      headers = {}
-      while (line = sock.gets) != "\r\n"
-        name, value = line.split(":", 2)
-        headers[name.downcase] = value.strip
-      end
-      # Read the whole request: closing with it unread resets the connection.
-      requests << [method, path, headers, sock.read(headers["content-length"].to_i)]
-      sock.write "HTTP/1.1 #{status_line}\r\nContent-Type: application/json\r\n" \
-                 "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n"
-      sock.write body
-      sock.close
-    end
-    yield "http://127.0.0.1:#{server.addr[1]}", requests
-  ensure
-    thread.join
-    server.close
+    Five00Matic::GitHub.new(repo: "you/repo", credentials: Five00Matic::Token.new(token: "t"),
+                            labels: ["error-report"], api_base: api_base)
   end
 
   def test_owns_only_issues_opened_in_its_repo
@@ -43,34 +17,29 @@ class GitHubTest < Minitest::Test
     refute github("http://unused").owns?(nil)
   end
 
-  def test_comment_on_a_missing_issue_raises_issue_gone
-    answering("404 Not Found", '{"message":"Not Found"}') do |api_base|
-      assert_raises(SentryTickets::IssueGone) { github(api_base).comment({ "number" => 7 }, body: "b") }
-    end
-  end
-
-  def test_open_issue_posts_the_issue_and_returns_where_it_was_filed
+  def test_open_issue_posts_with_the_credentials_token
     created = '{"number": 7, "html_url": "https://github.com/you/repo/issues/7"}'
-    answering("201 Created", created) do |api_base, requests|
+    Fixture.answering(["201 Created", created]) do |api_base, requests|
       issue = github(api_base).open_issue(title: "t", body: "b")
       assert_equal({ "repo" => "you/repo", "number" => 7, "url" => "https://github.com/you/repo/issues/7" }, issue,
                    "owns? and comment read the repo and number back from state")
 
-      method, path, _headers, body = requests.first
+      method, path, headers, body = requests.first
       assert_equal ["POST", "/repos/you/repo/issues"], [method, path]
+      assert_equal "Bearer t", headers["authorization"]
       assert_equal({ "title" => "t", "body" => "b", "labels" => ["error-report"] }, JSON.parse(body))
     end
   end
 
   def test_open_issue_without_a_number_in_the_response_raises
-    answering("201 Created", '{"html_url": "https://github.com/you/repo/issues/7"}') do |api_base|
-      error = assert_raises(SentryTickets::DeliveryError) { github(api_base).open_issue(title: "t", body: "b") }
+    Fixture.answering(["201 Created", '{"html_url": "https://github.com/you/repo/issues/7"}']) do |api_base, _requests|
+      error = assert_raises(Five00Matic::DeliveryError) { github(api_base).open_issue(title: "t", body: "b") }
       assert_equal "GitHub response has no issue number", error.message
     end
   end
 
   def test_comment_posts_the_notice_on_the_issue
-    answering("201 Created", '{"id": 1}') do |api_base, requests|
+    Fixture.answering(["201 Created", '{"id": 1}']) do |api_base, requests|
       github(api_base).comment({ "repo" => "you/repo", "number" => 7 }, body: "b")
 
       method, path, _headers, body = requests.first
@@ -79,16 +48,32 @@ class GitHubTest < Minitest::Test
     end
   end
 
+  def test_comment_on_a_missing_issue_raises_issue_gone
+    Fixture.answering(["404 Not Found", '{"message":"Not Found"}']) do |api_base, _requests|
+      assert_raises(Five00Matic::IssueGone) { github(api_base).comment({ "number" => 7 }, body: "b") }
+    end
+  end
+
   def test_comment_failure_other_than_a_404_is_not_issue_gone
-    answering("502 Bad Gateway", '{"message": "boom"}') do |api_base|
-      error = assert_raises(SentryTickets::DeliveryError) { github(api_base).comment({ "number" => 7 }, body: "b") }
-      refute_kind_of SentryTickets::IssueGone, error, "a transient failure must not drop the issue"
+    Fixture.answering(["502 Bad Gateway", '{"message": "boom"}']) do |api_base, _requests|
+      error = assert_raises(Five00Matic::DeliveryError) { github(api_base).comment({ "number" => 7 }, body: "b") }
+      refute_kind_of Five00Matic::IssueGone, error, "a transient failure must not drop the issue"
       assert_equal 502, error.status
     end
   end
 
+  # An AppToken whose installation is gone fails to mint with a 404 of its
+  # own, which says nothing about the issue.
+  def test_comment_without_a_token_is_not_issue_gone
+    no_token = Object.new
+    def no_token.token = raise(Five00Matic::DeliveryError.new("GitHub App auth 404: Not Found", status: 404))
+    github = Five00Matic::GitHub.new(repo: "you/repo", credentials: no_token, labels: [], api_base: "http://unused")
+    error = assert_raises(Five00Matic::DeliveryError) { github.comment({ "number" => 7 }, body: "b") }
+    assert_instance_of Five00Matic::DeliveryError, error
+  end
+
   def test_network_error_wraps_as_delivery_error
-    error = assert_raises(SentryTickets::DeliveryError) do
+    error = assert_raises(Five00Matic::DeliveryError) do
       github("http://127.0.0.1:1").open_issue(title: "t", body: "b")
     end
     assert_match(/connection refused/i, error.message)
@@ -98,8 +83,8 @@ class GitHubTest < Minitest::Test
   # JSON::ParserError message then carries raw bytes, and would otherwise
   # land in state and break every future persist.
   def test_garbage_success_body_wraps_with_valid_utf8_message
-    answering("200 OK", "\xFF\xFEbad!".b) do |api_base|
-      error = assert_raises(SentryTickets::DeliveryError) do
+    Fixture.answering(["200 OK", "\xFF\xFEbad!".b]) do |api_base, _requests|
+      error = assert_raises(Five00Matic::DeliveryError) do
         github(api_base).open_issue(title: "t", body: "b")
       end
       assert_match(/JSON::ParserError/, error.message)
@@ -110,7 +95,7 @@ class GitHubTest < Minitest::Test
   def test_delivery_error_messages_are_valid_utf8
     # Net::HTTP labels bodies binary; valid multibyte text must survive and
     # invalid bytes must not reach the JSON state file.
-    assert_equal "GitHub API 422: café", SentryTickets::DeliveryError.new("GitHub API 422: café".b).message
-    assert_equal "boom: \uFFFD\uFFFD", SentryTickets::DeliveryError.new("boom: \xFF\xFE".b).message
+    assert_equal "GitHub API 422: café", Five00Matic::DeliveryError.new("GitHub API 422: café".b).message
+    assert_equal "boom: ��", Five00Matic::DeliveryError.new("boom: \xFF\xFE".b).message
   end
 end

@@ -1,10 +1,10 @@
 # For a real Rack host (Puma, Rails, any Rack 2/3 app):
 #   rackup config.ru
-# or mount SentryTickets::App into an existing app.
+# or mount Five00Matic::App into an existing app.
 $LOAD_PATH.unshift(File.expand_path("lib", __dir__))
 
-require "sentry_tickets"
+require "five00matic"
 
 map "/sentry" do
-  run SentryTickets::App.new(SentryTickets::Config.new)
+  run Five00Matic::App.new(Five00Matic::Config.new)
 end

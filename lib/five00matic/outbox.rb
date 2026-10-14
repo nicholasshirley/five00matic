@@ -3,7 +3,7 @@
 require "digest/sha2"
 require "fileutils"
 
-module SentryTickets
+module Five00Matic
   # Stands in for GitHub when no repo or token is configured: issues and
   # notices are written to a directory as markdown files, so the whole flow,
   # formatting included, runs without a real GitHub.

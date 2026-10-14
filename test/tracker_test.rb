@@ -2,7 +2,7 @@
 
 require_relative "test_helper"
 
-# Stands in for SentryTickets::GitHub: every open files issue #42, and every
+# Stands in for Five00Matic::GitHub: every open files issue #42, and every
 # comment lands. Subclasses break one part of that.
 class FakeGitHub
   attr_reader :opens, :comments
@@ -25,14 +25,14 @@ class FakeGitHub
 end
 
 class FailingGitHub < FakeGitHub
-  def open_issue(title:, body:) = raise(SentryTickets::DeliveryError, "GitHub API 502: boom")
-  def comment(issue, body:) = raise(SentryTickets::DeliveryError, "GitHub API 502: boom")
+  def open_issue(title:, body:) = raise(Five00Matic::DeliveryError, "GitHub API 502: boom")
+  def comment(issue, body:) = raise(Five00Matic::DeliveryError, "GitHub API 502: boom")
 end
 
 # Fails with raw binary bytes in the message, the way a wrapped
 # JSON::ParserError on a middlebox's garbage response body would.
 class BinaryErrorGitHub < FakeGitHub
-  def open_issue(title:, body:) = raise(SentryTickets::DeliveryError, "boom: \xFF\xFE".b)
+  def open_issue(title:, body:) = raise(Five00Matic::DeliveryError, "boom: \xFF\xFE".b)
 end
 
 class SlowGitHub < FakeGitHub
@@ -42,9 +42,18 @@ class SlowGitHub < FakeGitHub
   end
 end
 
+# An outbox whose opens take long enough for sibling processes to pile up
+# inside them.
+class SlowOutbox < Five00Matic::Outbox
+  def open_issue(title:, body:)
+    sleep 0.2
+    super
+  end
+end
+
 # Opens fine; every comment 502s.
 class BadCommentGitHub < FakeGitHub
-  def comment(issue, body:) = raise(SentryTickets::DeliveryError.new("GitHub API 502: boom", status: 502))
+  def comment(issue, body:) = raise(Five00Matic::DeliveryError.new("GitHub API 502: boom", status: 502))
 end
 
 # Every comment finds its issue deleted. Opens are numbered 101, 102, ...
@@ -53,7 +62,7 @@ class GoneCommentGitHub < FakeGitHub
   attr_accessor :fail_opens
 
   def open_issue(title:, body:)
-    raise SentryTickets::DeliveryError, "GitHub API 502: boom" if fail_opens
+    raise Five00Matic::DeliveryError, "GitHub API 502: boom" if fail_opens
 
     @opens << title
     { "number" => 100 + @opens.size, "url" => "http://gh/#{100 + @opens.size}" }
@@ -61,7 +70,7 @@ class GoneCommentGitHub < FakeGitHub
 
   def comment(issue, body:)
     @comments << issue["number"]
-    raise SentryTickets::IssueGone, "GitHub API 404: Not Found"
+    raise Five00Matic::IssueGone, "GitHub API 404: Not Found"
   end
 end
 
@@ -70,7 +79,7 @@ class TrackerTest < Minitest::Test
   SIX_HOURS = 6 * 3600
 
   def tracker(destination, store: Fixture.store, notice_interval: 0)
-    SentryTickets::Tracker.new(store: store, destination: destination, notice_interval: notice_interval)
+    Five00Matic::Tracker.new(store: store, destination: destination, notice_interval: notice_interval)
   end
 
   def test_first_occurrence_opens_an_issue
@@ -157,12 +166,29 @@ class TrackerTest < Minitest::Test
     assert_empty github.comments
   end
 
+  def test_first_occurrences_in_separate_processes_open_one_issue
+    dir = Fixture.store_dir
+    outbox = File.join(dir, "outbox")
+    pids = 3.times.map do
+      fork do
+        tracker(SlowOutbox.new(outbox), store: Fixture.store(dir)).track(Fixture.event)
+        exit!(0)
+      end
+    end
+    pids.each { |pid| assert_equal 0, Process.wait2(pid).last.exitstatus }
+
+    files = Dir[File.join(outbox, "*.md")].map { |f| File.basename(f) }
+    assert_equal 1, files.count { |f| f.start_with?("issue-") }, "one issue across processes, got #{files}"
+    assert_equal 2, files.count { |f| f.start_with?("comment-") }, "the later occurrences become notices"
+    assert_equal 3, Fixture.store(dir).groups.first.count
+  end
+
   def test_dry_run_state_opens_issue_when_delivery_becomes_real
     # README workflow: run without a token first, then "set repo + token and
     # restart". An issue filed to the outbox is not one GitHub holds, so the
     # next occurrence opens a real one, notice window or not.
     dir = Fixture.store_dir
-    dry = tracker(SentryTickets::Outbox.new(File.join(dir, "outbox")), store: Fixture.store(dir),
+    dry = tracker(Five00Matic::Outbox.new(File.join(dir, "outbox")), store: Fixture.store(dir),
                                                                         notice_interval: SIX_HOURS)
     dry.track(Fixture.event, now: T0)
 

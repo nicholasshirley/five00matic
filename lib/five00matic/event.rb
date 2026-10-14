@@ -2,7 +2,7 @@
 
 require "digest/sha2"
 
-module SentryTickets
+module Five00Matic
   # A sentry-ruby error event: the string-keyed hash event.to_json_compatible
   # produces. Everything this app knows about the payload's layout lives here
   # and in the two value classes below; a section of an unexpected type reads

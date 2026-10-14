@@ -47,7 +47,7 @@ class ServeTest < Minitest::Test
     assert_equal "ok", health["status"]
     assert_equal 1, health["tracked"]
     assert health["dry_run"]
-    assert_equal SentryTickets::VERSION, health["version"]
+    assert_equal Five00Matic::VERSION, health["version"]
   end
 
   def test_garbage_is_400

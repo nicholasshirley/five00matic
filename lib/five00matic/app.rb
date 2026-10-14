@@ -2,7 +2,7 @@
 
 require "json"
 
-module SentryTickets
+module Five00Matic
   # The Rack face of the tracker: POST /events takes the event hash a
   # before_send hook has and answers with what happened to it; GET /health
   # and /issues report on the store.
@@ -10,28 +10,20 @@ module SentryTickets
     InvalidPayload = Class.new(StandardError)
 
     def initialize(config)
-      @store = Store.new(config.data_dir)
-      @destination = destination_for(config)
-      @tracker = Tracker.new(store: @store, destination: @destination, notice_interval: config.notice_interval)
+      @tracker = Five00Matic.tracker(config)
     end
 
     def call(env)
       case [env["REQUEST_METHOD"], env["PATH_INFO"]]
       when ["POST", "/events"] then receive(env["rack.input"]&.read.to_s)
-      when ["GET", "/health"] then json({ status: "ok", version: VERSION, dry_run: @destination.dry_run?,
-                                          tracked: @store.size })
-      when ["GET", "/issues"] then json(@store.groups.map(&:to_h))
+      when ["GET", "/health"] then json({ status: "ok", version: VERSION, dry_run: @tracker.destination.dry_run?,
+                                          tracked: @tracker.store.size })
+      when ["GET", "/issues"] then json(@tracker.store.groups.map(&:to_h))
       else json({ error: "not found" }, status: 404)
       end
     end
 
     private
-
-    def destination_for(config)
-      return Outbox.new(File.join(config.data_dir, "outbox")) if config.dry_run?
-
-      GitHub.new(repo: config.repo, token: config.token, labels: config.labels, api_base: config.api_base)
-    end
 
     # Delivery runs inline. Its failures are recorded and retried on the next
     # occurrence, so the answer is still 200: the event is durably counted,
