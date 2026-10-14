@@ -1,0 +1,35 @@
+# Runs on GitHub's runners, not the Studio's self-hosted ones: the repo is public, and a self-hosted runner would
+# run a fork's pull request on the Studio. One check per Ruby, test (3.2), test (3.4) and test (4.0), to require
+# on main; 3.2 is the gemspec's floor.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: [ "3.2", "3.4", "4.0" ]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+
+      - name: Run tests
+        run: bundle exec ruby -Ilib -Itest -e 'Dir["test/*_test.rb"].each { |f| require File.expand_path(f) }'
