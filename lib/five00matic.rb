@@ -10,6 +10,7 @@ require_relative "five00matic/config"
 require_relative "five00matic/event"
 require_relative "five00matic/group"
 require_relative "five00matic/store"
+require_relative "five00matic/database_store"
 require_relative "five00matic/ticket"
 require_relative "five00matic/notice"
 require_relative "five00matic/delivery_error"
@@ -19,11 +20,15 @@ require_relative "five00matic/tracker"
 require_relative "five00matic/scrubber"
 require_relative "five00matic/hook"
 require_relative "five00matic/app"
+require_relative "five00matic/engine" if defined?(Rails::Engine)
 
 # Receives Sentry-shaped error events from the sentry-ruby SDK (via a
 # before_send hook) and turns each unique error into a GitHub issue, with
 # throttled recurrence notices.
 module Five00Matic
+  # Loaded on first use, so requiring the gem loads no Rails framework.
+  autoload :GroupRecord, File.join(__dir__, "five00matic", "group_record")
+
   # The pipeline a config describes: a store in its data directory feeding
   # the destination its credentials select, the outbox without any.
   def self.tracker(config)
