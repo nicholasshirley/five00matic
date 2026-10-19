@@ -260,8 +260,10 @@ Notes:
   or a non-finite number (the SDK can produce neither), and an event with
   neither an exception nor a message. Sections of an unexpected shape are
   otherwise read as empty rather than refused.
-- **First occurrence** of a fingerprint: an issue is opened immediately
-  (count is 1).
+- **First occurrence** of a fingerprint: an issue is opened. With
+  `delivery: :inline` and in the HTTP receiver, that is at once, with a
+  count of 1. With `delivery: :active_job`, it is when the queued job
+  runs, and the issue counts every occurrence recorded by then.
 - **Recurrences**: count increments on every event, but a GitHub notification
   (comment) is only sent once per `TICKET_NOTICE_INTERVAL` (default 6h). The
   comment reports new-since-notice and total counts plus the latest event id.
