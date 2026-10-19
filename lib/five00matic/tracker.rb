@@ -28,7 +28,7 @@ module Five00Matic
 
     # Whether the destination is owed anything for the group now: its
     # issue, or a recurrence notice.
-    def owed?(group, now: Time.now) = !@destination.owns?(group.issue) || group.notice_due?(now, @notice_interval)
+    def owed?(group, now: Time.now) = !@destination.owns?(group.issue) || notice_owed?(group, now)
 
     # Gives the destination what the group is owed now, rendered from the
     # event, and returns [action, group] as track does. The caller holds
@@ -37,12 +37,15 @@ module Five00Matic
     # (filed in dry-run, say), gets its due on whichever delivery comes next.
     def deliver(group, event, now: Time.now)
       if !@destination.owns?(group.issue) then open_issue(group, event, now)
-      elsif group.notice_due?(now, @notice_interval) then post_notice(group, event, now)
+      elsif notice_owed?(group, now) then post_notice(group, event, now)
       else [:suppressed, group]
       end
     end
 
     private
+
+    # A delivery queued before the last one landed can find nothing left to report.
+    def notice_owed?(group, now) = group.unnotified_count.positive? && group.notice_due?(now, @notice_interval)
 
     def open_issue(group, event, now)
       issue = @destination.open_issue(title: event.title, body: Ticket.new(event, group).body)

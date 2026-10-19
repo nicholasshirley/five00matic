@@ -88,6 +88,15 @@ class QueuedTrackerTest < Minitest::Test
     assert_equal 1, @github.opens.size
   end
 
+  def test_a_delivery_run_a_notice_interval_late_with_nothing_new_posts_no_notice
+    2.times { @tracker.track(Fixture.event, now: T0) }
+    opening, late = @queued.shift(2)
+    @tracker.deliver(*opening, now: T0)
+    action, = @tracker.deliver(*late, now: T0 + SIX_HOURS)
+    assert_equal :suppressed, action
+    assert_empty @github.comments, "the issue already counts both occurrences"
+  end
+
   def test_concurrent_deliveries_of_one_fingerprint_open_one_issue
     @github.delay = 0.2
     3.times { @tracker.track(Fixture.event, now: T0) }
