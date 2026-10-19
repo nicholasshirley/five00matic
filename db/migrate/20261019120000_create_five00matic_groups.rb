@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Rails names the class after the file: "five00matic" camelizes as Five00matic.
-class CreateFive00maticGroups < ActiveRecord::Migration[8.1]
+class CreateFive00maticGroups < ActiveRecord::Migration[7.1]
   def change
     create_table :five00matic_groups do |t|
       t.string :fingerprint, null: false, index: { unique: true }
