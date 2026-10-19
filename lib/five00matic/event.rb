@@ -37,6 +37,13 @@ module Five00Matic
       env["REMOTE_ADDR"] if env.is_a?(Hash)
     end
 
+    # The class of the job that raised, which sentry-rails sends in the
+    # active_job context.
+    def job_class
+      job = contexts["active_job"]
+      job["job_class"] if job.is_a?(Hash)
+    end
+
     # Ordered as the SDK sends them: root cause first, raised exception last.
     def exceptions
       Array(hash_at("exception")["values"]).grep(Hash).map { |v| ExceptionValue.new(v) }

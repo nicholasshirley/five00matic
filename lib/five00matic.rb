@@ -17,6 +17,7 @@ require_relative "five00matic/delivery_error"
 require_relative "five00matic/github"
 require_relative "five00matic/outbox"
 require_relative "five00matic/tracker"
+require_relative "five00matic/queued_tracker"
 require_relative "five00matic/scrubber"
 require_relative "five00matic/hook"
 require_relative "five00matic/app"
@@ -28,23 +29,47 @@ require_relative "five00matic/engine" if defined?(Rails::Engine)
 module Five00Matic
   # Loaded on first use, so requiring the gem loads no Rails framework.
   autoload :GroupRecord, File.join(__dir__, "five00matic", "group_record")
+  autoload :DeliveryJob, File.join(__dir__, "five00matic", "delivery_job")
 
-  # The pipeline a config describes: a store in its data directory feeding
-  # the destination its credentials select, the outbox without any.
-  def self.tracker(config)
+  DELIVERIES = %i[inline active_job].freeze
+
+  class << self
+    # What DeliveryJob delivers through: the tracker the last
+    # before_send(delivery: :active_job) in this process built.
+    attr_accessor :queued_tracker
+  end
+
+  # The pipeline a config describes: a store, in its data directory unless
+  # given, feeding the destination its credentials select, the outbox
+  # without any.
+  def self.tracker(config, store: Store.new(config.data_dir))
     destination =
       if config.dry_run?
         Outbox.new(File.join(config.data_dir, "outbox"))
       else
         GitHub.new(repo: config.repo, credentials: config.credentials, labels: config.labels, api_base: config.api_base)
       end
-    Tracker.new(store: Store.new(config.data_dir), destination: destination, notice_interval: config.notice_interval)
+    Tracker.new(store: store, destination: destination, notice_interval: config.notice_interval)
   end
 
   # The before_send callable for Sentry.init, from the keywords Config
   # accepts (repo:, app_id:, private_key:, data_dir:, ...) plus the hook's
-  # own: filter: (the app's parameter filter), mode: and logger:.
-  def self.before_send(filter: nil, mode: :shadow, logger: nil, **config)
-    Hook.new(tracker: tracker(Config.new(**config)), scrubber: Scrubber.new(filter), mode: mode, logger: logger)
+  # own: filter: (the app's parameter filter), mode:, logger: and
+  # delivery:. delivery: :inline keeps the groups in data_dir and delivers
+  # on the hook's thread; :active_job keeps them in the app's database and
+  # delivers from DeliveryJob.
+  def self.before_send(filter: nil, mode: :shadow, logger: nil, delivery: :inline, **config)
+    config = Config.new(**config)
+    tracker =
+      case delivery
+      when :inline then tracker(config)
+      when :active_job
+        self.queued_tracker = QueuedTracker.new(
+          tracker: tracker(config, store: DatabaseStore.new),
+          enqueue: ->(fingerprint, payload) { DeliveryJob.perform_later(fingerprint, payload) }
+        )
+      else raise ArgumentError, "delivery must be one of #{DELIVERIES.join(', ')}, got #{delivery.inspect}"
+      end
+    Hook.new(tracker: tracker, scrubber: Scrubber.new(filter), mode: mode, logger: logger)
   end
 end

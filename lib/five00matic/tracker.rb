@@ -22,21 +22,27 @@ module Five00Matic
     # both open an issue.
     def track(event, now: Time.now)
       @store.synchronize(event.fingerprint) do
-        deliver(@store.record(event, at: now), event, now)
+        deliver(@store.record(event, at: now), event, now: now)
       end
     end
 
-    private
+    # Whether the destination is owed anything for the group now: its
+    # issue, or a recurrence notice.
+    def owed?(group, now: Time.now) = !@destination.owns?(group.issue) || group.notice_due?(now, @notice_interval)
 
-    # Decided from the group alone, so a group whose last delivery failed, or
-    # whose issue the destination does not hold (filed in dry-run, say), gets
-    # its due on whichever occurrence comes next.
-    def deliver(group, event, now)
+    # Gives the destination what the group is owed now, rendered from the
+    # event, and returns [action, group] as track does. The caller holds
+    # the fingerprint's lock. Decided from the group alone, so a group whose
+    # last delivery failed, or whose issue the destination does not hold
+    # (filed in dry-run, say), gets its due on whichever delivery comes next.
+    def deliver(group, event, now: Time.now)
       if !@destination.owns?(group.issue) then open_issue(group, event, now)
       elsif group.notice_due?(now, @notice_interval) then post_notice(group, event, now)
       else [:suppressed, group]
       end
     end
+
+    private
 
     def open_issue(group, event, now)
       issue = @destination.open_issue(title: event.title, body: Ticket.new(event, group).body)
