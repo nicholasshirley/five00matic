@@ -113,4 +113,10 @@ class EventTest < Minitest::Test
     assert_equal 100, title.length
     assert title.end_with?("...")
   end
+
+  def test_job_class_is_read_from_the_active_job_context
+    assert_equal "OrderJob", event("contexts" => { "active_job" => { "job_class" => "OrderJob" } }).job_class
+    assert_nil Fixture.event.job_class
+    assert_nil event("contexts" => { "active_job" => "OrderJob" }).job_class
+  end
 end

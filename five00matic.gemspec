@@ -10,6 +10,6 @@ Gem::Specification.new do |spec|
   spec.homepage = "https://github.com/nicholasshirley/five00matic"
 
   spec.required_ruby_version = ">= 3.2" # Group is a Data class
-  spec.files = Dir["lib/**/*.rb"] + ["README.md"]
+  spec.files = Dir["lib/**/*.rb"] + Dir["db/**/*.rb"] + ["README.md"]
   spec.require_paths = ["lib"]
 end

@@ -122,6 +122,11 @@ module Fixture
   end
 end
 
+# What the SDK hands a before_send hook, as far as the hook cares.
+FakeErrorEvent = Struct.new(:payload) do
+  def to_json_compatible = payload
+end
+
 # Stands in for ActiveSupport::ParameterFilter: replaces the value of every
 # key naming a secret, at any depth, and returns a new hash.
 class FakeFilter

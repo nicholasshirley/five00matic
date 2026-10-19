@@ -2,8 +2,9 @@
 
 module Five00Matic
   # The sentry-ruby before_send callable. Each error event is scrubbed and
-  # handed to the tracker in-process, on the SDK's worker thread; what
-  # Sentry still gets depends on the mode:
+  # handed to the tracker, which delivers it or queues its delivery,
+  # in-process on the thread the SDK sends from; what Sentry still gets
+  # depends on the mode:
   #
   #   :shadow   the event, every time: Sentry sees everything it did before,
   #             and GitHub gets tickets besides
@@ -15,6 +16,9 @@ module Five00Matic
   # is logged, and the event goes to Sentry as if there were no hook.
   class Hook
     MODES = %i[shadow replace].freeze
+    # Its failures go to Sentry untracked: tracking one would queue another
+    # delivery, which could fail the same way.
+    DELIVERY_JOB = "Five00Matic::DeliveryJob"
 
     def initialize(tracker:, scrubber: Scrubber.new, mode: :shadow, logger: nil)
       raise ArgumentError, "mode must be one of #{MODES.join(', ')}, got #{mode.inspect}" unless MODES.include?(mode)
@@ -28,7 +32,10 @@ module Five00Matic
     # The SDK passes its Sentry::ErrorEvent and a hint; anything answering
     # to_json_compatible with the event hash will do.
     def call(event, _hint = nil)
-      tracked = Event.new(@scrubber.scrub(event.to_json_compatible))
+      payload = event.to_json_compatible
+      return event if Event.new(payload).job_class == DELIVERY_JOB
+
+      tracked = Event.new(@scrubber.scrub(payload))
       return event unless tracked.reportable?
 
       @tracker.track(tracked)

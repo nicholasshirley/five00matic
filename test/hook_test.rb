@@ -2,11 +2,6 @@
 
 require_relative "test_helper"
 
-# What the SDK hands a before_send hook, as far as the hook cares.
-FakeErrorEvent = Struct.new(:payload) do
-  def to_json_compatible = payload
-end
-
 # Collects what a hook logs.
 FakeLogger = Struct.new(:lines) do
   def error(text) = lines << text
@@ -80,8 +75,27 @@ class HookTest < Minitest::Test
     assert_match(/\A\[five00matic\] Errno::E/, logger.lines.first)
   end
 
+  def test_a_failure_of_the_delivery_job_goes_to_sentry_untracked
+    payload = Fixture.payload
+    payload["contexts"]["active_job"] = { "job_class" => "Five00Matic::DeliveryJob", "job_id" => "j-1" }
+    event = FakeErrorEvent.new(payload)
+    assert_same event, Five00Matic::Hook.new(tracker: @tracker, mode: :replace).call(event)
+    assert_empty issue_files
+  end
+
+  def test_another_jobs_failure_is_tracked
+    payload = Fixture.payload
+    payload["contexts"]["active_job"] = { "job_class" => "OrderJob", "job_id" => "j-1" }
+    assert_nil Five00Matic::Hook.new(tracker: @tracker, mode: :replace).call(FakeErrorEvent.new(payload))
+    assert_equal 1, issue_files.size
+  end
+
   def test_unknown_mode_is_refused
     assert_raises(ArgumentError) { Five00Matic::Hook.new(tracker: @tracker, mode: :both) }
+  end
+
+  def test_unknown_delivery_is_refused
+    assert_raises(ArgumentError) { Five00Matic.before_send(repo: nil, token: nil, data_dir: @dir, delivery: :sidekiq) }
   end
 
   def test_before_send_builds_the_hook_from_config

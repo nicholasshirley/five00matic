@@ -31,8 +31,10 @@ module Five00Matic
            release: event.release || release, environment: event.environment || environment)
     end
 
-    def delivered(issue, at:)
-      with(issue: issue, last_notice_at: at.getutc.iso8601, last_notice_count: count, last_error: nil)
+    # reported is the count the ticket or notice gave, which occurrences
+    # recorded while it was in flight have since passed.
+    def delivered(issue, at:, reported: count)
+      with(issue: issue, last_notice_at: at.getutc.iso8601, last_notice_count: reported, last_error: nil)
     end
 
     def failed(message) = with(last_error: message)

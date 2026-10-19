@@ -22,32 +22,41 @@ module Five00Matic
     # both open an issue.
     def track(event, now: Time.now)
       @store.synchronize(event.fingerprint) do
-        deliver(@store.record(event, at: now), event, now)
+        deliver(@store.record(event, at: now), event, now: now)
+      end
+    end
+
+    # Whether the destination is owed anything for the group now: its
+    # issue, or a recurrence notice.
+    def owed?(group, now: Time.now) = !@destination.owns?(group.issue) || notice_owed?(group, now)
+
+    # Gives the destination what the group is owed now, rendered from the
+    # event, and returns [action, group] as track does. The caller holds
+    # the fingerprint's lock. Decided from the group alone, so a group whose
+    # last delivery failed, or whose issue the destination does not hold
+    # (filed in dry-run, say), gets its due on whichever delivery comes next.
+    def deliver(group, event, now: Time.now)
+      if !@destination.owns?(group.issue) then open_issue(group, event, now)
+      elsif notice_owed?(group, now) then post_notice(group, event, now)
+      else [:suppressed, group]
       end
     end
 
     private
 
-    # Decided from the group alone, so a group whose last delivery failed, or
-    # whose issue the destination does not hold (filed in dry-run, say), gets
-    # its due on whichever occurrence comes next.
-    def deliver(group, event, now)
-      if !@destination.owns?(group.issue) then open_issue(group, event, now)
-      elsif group.notice_due?(now, @notice_interval) then post_notice(group, event, now)
-      else [:suppressed, group]
-      end
-    end
+    # A delivery queued before the last one landed can find nothing left to report.
+    def notice_owed?(group, now) = group.unnotified_count.positive? && group.notice_due?(now, @notice_interval)
 
     def open_issue(group, event, now)
       issue = @destination.open_issue(title: event.title, body: Ticket.new(event, group).body)
-      [:opened, update(group) { |g| g.delivered(issue, at: now) }]
+      [:opened, update(group) { |g| g.delivered(issue, at: now, reported: group.count) }]
     rescue DeliveryError => e
       [:opened, update(group) { |g| g.failed(e.message) }]
     end
 
     def post_notice(group, event, now)
       @destination.comment(group.issue, body: Notice.new(group).body)
-      [:commented, update(group) { |g| g.delivered(g.issue, at: now) }]
+      [:commented, update(group) { |g| g.delivered(g.issue, at: now, reported: group.count) }]
     rescue IssueGone
       open_issue(update(group, &:without_issue), event, now)
     rescue DeliveryError => e
