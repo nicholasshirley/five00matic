@@ -40,14 +40,14 @@ module Five00Matic
 
     def open_issue(group, event, now)
       issue = @destination.open_issue(title: event.title, body: Ticket.new(event, group).body)
-      [:opened, update(group) { |g| g.delivered(issue, at: now) }]
+      [:opened, update(group) { |g| g.delivered(issue, at: now, reported: group.count) }]
     rescue DeliveryError => e
       [:opened, update(group) { |g| g.failed(e.message) }]
     end
 
     def post_notice(group, event, now)
       @destination.comment(group.issue, body: Notice.new(group).body)
-      [:commented, update(group) { |g| g.delivered(g.issue, at: now) }]
+      [:commented, update(group) { |g| g.delivered(g.issue, at: now, reported: group.count) }]
     rescue IssueGone
       open_issue(update(group, &:without_issue), event, now)
     rescue DeliveryError => e

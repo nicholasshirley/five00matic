@@ -56,6 +56,26 @@ class BadCommentGitHub < FakeGitHub
   def comment(issue, body:) = raise(Five00Matic::DeliveryError.new("GitHub API 502: boom", status: 502))
 end
 
+# Lands one more occurrence of the event while each delivery is in flight,
+# as a process recording outside the fingerprint's lock can.
+class BusyGitHub < FakeGitHub
+  def initialize(store, event)
+    super()
+    @store = store
+    @event = event
+  end
+
+  def open_issue(title:, body:)
+    @store.record(@event, at: Time.now)
+    super
+  end
+
+  def comment(issue, body:)
+    @store.record(@event, at: Time.now)
+    super
+  end
+end
+
 # Every comment finds its issue deleted. Opens are numbered 101, 102, ...
 # and fail while fail_opens is set.
 class GoneCommentGitHub < FakeGitHub
@@ -152,6 +172,17 @@ class TrackerTest < Minitest::Test
     assert_equal :commented, action
     assert_match(/502/, group.last_error)
     assert_equal 42, group.issue["number"], "a transient comment failure must keep the issue number"
+  end
+
+  def test_a_delivery_records_the_count_it_reported
+    store = Fixture.store
+    tracker = tracker(BusyGitHub.new(store, Fixture.event), store: store)
+
+    _, group = tracker.track(Fixture.event)
+    assert_equal [2, 1], [group.count, group.last_notice_count], "the second occurrence landed while the issue opened"
+
+    _, group = tracker.track(Fixture.event)
+    assert_equal [4, 3], [group.count, group.last_notice_count], "the fourth occurrence landed while the notice posted"
   end
 
   def test_concurrent_first_occurrences_open_one_issue
